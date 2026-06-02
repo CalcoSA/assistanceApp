@@ -1,0 +1,60 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+
+    env:
+      VM_HOST: ${{ secrets.VM_HOST }}
+      VM_USER: ${{ secrets.VM_USER }}
+      PROD_PATH: ${{ secrets.PROD_PATH }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create backend env file
+        run: |
+          cat > backend/.env << 'EOF'
+          ${{ secrets.BACKEND_ENV_PROD }}
+          EOF
+
+          chmod 600 backend/.env
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+
+          cat > ~/.ssh/id_rsa << 'EOF'
+          ${{ secrets.VM_SSH_KEY }}
+          EOF
+
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts
+
+      - name: Create PROD folder on VM
+        run: |
+          ssh "$VM_USER@$VM_HOST" "mkdir -p '$PROD_PATH/backend/uploads'"
+
+      - name: Sync project to PROD
+        run: |
+          rsync -az --delete \
+            --exclude ".git" \
+            --exclude "backend/.venv" \
+            --exclude "backend/uploads" \
+            --exclude "frontend/node_modules" \
+            --exclude "frontend/dist" \
+            ./ "$VM_USER@$VM_HOST:$PROD_PATH/"
+
+      - name: Deploy Production with Docker Compose
+        run: |
+          ssh "$VM_USER@$VM_HOST" "
+            cd '$PROD_PATH' &&
+            docker compose -f docker-compose.prod.yml up -d --build --remove-orphans &&
+            docker image prune -f
+          "

@@ -1,0 +1,28 @@
+name: assistance-app-qa
+
+services:
+  backend:
+    container_name: assistance-app-qa
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    expose:
+      - "8000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    container_name: assistance-app-qa
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
