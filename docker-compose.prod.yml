@@ -1,0 +1,28 @@
+name: assistance-app-prod
+
+services:
+  backend:
+    container_name: assistance-app-prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    expose:
+      - "8000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    container_name: assistance-app-prod
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+    ports:
+      - "8082:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
