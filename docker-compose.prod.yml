@@ -2,7 +2,7 @@ name: assistance-app-prod
 
 services:
   backend:
-    container_name: assistance-app-prod
+    container_name: assistance-app-prod-backend
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -15,7 +15,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    container_name: assistance-app-prod
+    container_name: assistance-app-prod-frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile
