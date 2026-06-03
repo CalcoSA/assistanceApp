@@ -55,7 +55,7 @@ export function AttendancePage() {
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const { tokenEvent } = useParams<{ tokenEvent: string }>();
   const signatureRef = useRef<SignatureCanvas | null>(null);
-  const [personFound, setPersonFound] = useState(false);
+  const [, setPersonFound] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const showResponseModal = (severity: ResponseModalSeverity, title: string, message: string) => {
