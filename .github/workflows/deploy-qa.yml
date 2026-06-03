@@ -55,6 +55,6 @@ jobs:
         run: |
           ssh "$VM_USER@$VM_HOST" "
             cd '$QA_PATH' &&
-            docker compose -f docker-compose.qa.yml up -d --build --remove-orphans &&
+            docker-compose -f docker-compose.qa.yml up -d --build --remove-orphans &&
             docker image prune -f
           "
