@@ -115,7 +115,7 @@ export function EventPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [eventRowsPerPage] = useState(10);
-  const [error, setError] = useState("");
+  const [, setError] = useState("");
 
   const showResponseModal = (severity: ResponseModalSeverity, title: string, message: string) => {
     setResponseModal({
@@ -601,55 +601,6 @@ export function EventPage() {
     if (!value) return "";
 
     return new Date(value).toLocaleString("es-CO");
-  };
-
-  const applySheetStyle = (worksheet: XLSX.WorkSheet, range: XLSX.Range) => {
-    const headerStyle = {
-      font: { bold: true, color: { rgb: "FFFFFF" } },
-      fill: { fgColor: { rgb: "4B2E1F" } },
-      alignment: { horizontal: "center", vertical: "center" },
-      border: {
-        top: { style: "thin", color: { rgb: "D8C2AE" } },
-        bottom: { style: "thin", color: { rgb: "D8C2AE" } },
-        left: { style: "thin", color: { rgb: "D8C2AE" } },
-        right: { style: "thin", color: { rgb: "D8C2AE" } },
-      },
-    };
-
-    const cellStyle = {
-      alignment: { vertical: "center", wrapText: true },
-      border: {
-        top: { style: "thin", color: { rgb: "E8D8C8" } },
-        bottom: { style: "thin", color: { rgb: "E8D8C8" } },
-        left: { style: "thin", color: { rgb: "E8D8C8" } },
-        right: { style: "thin", color: { rgb: "E8D8C8" } },
-      },
-    };
-
-    for (let row = range.s.r; row <= range.e.r; row++) {
-      for (let col = range.s.c; col <= range.e.c; col++) {
-        const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
-
-        if (!worksheet[cellAddress]) continue;
-
-        (worksheet[cellAddress] as any).s = row === 0 ? headerStyle : cellStyle;
-      }
-    }
-  };
-
-  const createStyledSheet = (workbook: XLSX.WorkBook, sheetName: string, rows: unknown[][], columnWidths: number[]) => {
-    const worksheet = XLSX.utils.aoa_to_sheet(rows);
-
-    worksheet["!cols"] = columnWidths.map((width) => ({ wch: width }));
-
-    const range = XLSX.utils.decode_range(worksheet["!ref"] ?? "A1:A1");
-    applySheetStyle(worksheet, range);
-
-    worksheet["!autofilter"] = {
-      ref: worksheet["!ref"] ?? "A1:A1",
-    };
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   };
 
   const exportEventToExcel = () => {
