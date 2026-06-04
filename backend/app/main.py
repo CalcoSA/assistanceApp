@@ -24,7 +24,8 @@ from time import time
 setupLogging()
 logger = getLogger(__name__)
 
-app = FastAPI(title="Assistance API", version="1.0.0", root_path="/api")
+#app = FastAPI(title="Assistance API", version="1.0.0", root_path="/api")
+app = FastAPI(title="Assistance API", version="1.0.0")
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 UPLOADS_DIR = BACKEND_DIR / "uploads"
