@@ -45,10 +45,12 @@ const emptyForm: AttendanceFormState = {
 };
 
 export function AttendancePage() {
-  const [responseModal, setResponseModal] = useState<ResponseModalState>(emptyResponseModal);
+  const [signatureCanvasSize, setSignatureCanvasSize] = useState({ width: 700, height: 180, });
+  const [responseModal, setResponseModal] = useState<ResponseModalState>(emptyResponseModal);  
   const [solutionCenters, setSolutionCenters] = useState<SolutionCenter[]>([]);
   const [personnelTypes, setPersonnelTypes] = useState<PersonnelType[]>([]);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const signatureContainerRef = useRef<HTMLDivElement | null>(null);
   const [form, setForm] = useState<AttendanceFormState>(emptyForm);
   const [replaceSignature, setReplaceSignature] = useState(false);
   const [searchingPerson, setSearchingPerson] = useState(false);
@@ -158,6 +160,29 @@ export function AttendancePage() {
     loadPersonnelTypes();
     loadSolutionCenters();
   }, [tokenEvent]);
+
+  useEffect(() => {
+    const updateCanvasSize = () => {
+      if (!signatureContainerRef.current) return;
+
+      const width = signatureContainerRef.current.offsetWidth;
+      setSignatureCanvasSize({ width, height: 180, });
+
+      setTimeout(() => {
+        signatureRef.current?.clear();
+      }, 0);
+    };
+
+    updateCanvasSize();
+
+    window.addEventListener("resize", updateCanvasSize);
+    window.addEventListener("orientationchange", updateCanvasSize);
+
+    return () => {
+      window.removeEventListener("resize", updateCanvasSize);
+      window.removeEventListener("orientationchange", updateCanvasSize);
+    };
+  }, []);
 
   const handleFormChange = (
     field: keyof AttendanceFormState,
@@ -438,8 +463,31 @@ export function AttendancePage() {
               </Stack>
             ) : (
               <Stack spacing={1}>
-                <Box sx={{ border: "1px solid #E8D8C8", borderRadius: 2, bgcolor: "#fff", width: "100%", height: 180, overflow: "hidden", }}>
-                  <SignatureCanvas ref={ signatureRef } canvasProps={{ width: 700, height: 180, style: { width: "100%", height: "180px", },}}/>
+                <Box
+                  ref={signatureContainerRef}
+                  sx={{
+                    border: "1px solid #E8D8C8",
+                    borderRadius: 2,
+                    bgcolor: "#fff",
+                    width: "100%",
+                    height: 180,
+                    overflow: "hidden",
+                    touchAction: "none",
+                  }}
+                >
+                  <SignatureCanvas
+                    ref={signatureRef}
+                    canvasProps={{
+                      width: signatureCanvasSize.width,
+                      height: signatureCanvasSize.height,
+                      style: {
+                        width: `${signatureCanvasSize.width}px`,
+                        height: `${signatureCanvasSize.height}px`,
+                        display: "block",
+                        touchAction: "none",
+                      },
+                    }}
+                  />
                 </Box>
                 <Stack direction="row" spacing={1}>
                   <Button variant="outlined" onClick={ clearSignature } disabled={ saving } sx={{ borderColor: "#8B6A55", color: "#4B2E1F", }}>
