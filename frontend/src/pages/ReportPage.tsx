@@ -1398,7 +1398,7 @@ export function ReportPage() {
                     Promedio horas por colaborador
                   </Typography>
                   <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                    {averageTrainingTimeReport?.averageTrainingHoursPerWorker ?? 0}
+                    {(averageTrainingTimeReport?.averageTrainingHoursPerWorker ?? 0).toFixed(4)}
                   </Typography>
                 </CardContent>
               </Card>
