@@ -581,5 +581,5 @@ class ReportRepository(IReportRepository):
         return {
             "totalWorkers": totalWorkers,
             "totalInternalTrainingHours": round(totalInternalTrainingHours, 2),
-            "averageTrainingHoursPerWorker": round(averageTrainingHoursPerWorker, 2),
+            "averageTrainingHoursPerWorker": round(averageTrainingHoursPerWorker, 4),
         }
