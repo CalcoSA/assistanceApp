@@ -48,7 +48,7 @@ jobs:
 
           {
             printf 'ONLYOFFICE_JWT_SECRET=%s\n' "$ONLYOFFICE_JWT_SECRET_VALUE"
-            printf 'ONLYOFFICE_HOST_PORT=8085\n'
+            printf 'ONLYOFFICE_HOST_PORT=8086\n'
           } > .env
 
           chmod 600 backend/.env .env
