@@ -191,6 +191,15 @@ class EventApplication(IEventApplication):
         else:
             self._validateUpdateBeforeEventStarted(eventData, eventFound)
 
+        if eventData.scheduledPeopleNumber is not None:
+            attendanceCount = self.eventRepository.countAttendances(IdEvent)
+
+            if eventData.scheduledPeopleNumber < attendanceCount:
+                raise ValueError(
+                    "Las personas programadas no pueden ser menores que "
+                    f"los {attendanceCount} asistentes ya registrados."
+                )
+
         facilitatorData = self._normalizeEventFacilitators(
             facilitatorName=self._getFinalUpdateValue(
                 eventData,
@@ -356,6 +365,14 @@ class EventApplication(IEventApplication):
     def _validateCreateData(self, eventData: EventCreateDto) -> None:
         if not eventData.titleEvent.strip():
             raise ValueError("El título del evento es obligatorio.")
+
+        if (
+            eventData.scheduledPeopleNumber is not None
+            and eventData.scheduledPeopleNumber < 0
+        ):
+            raise ValueError(
+                "El número de personas programadas debe ser mayor o igual a cero."
+            )
 
         eventStartDateTime = datetime.combine(eventData.dateEvent, eventData.startTimeEvent)
 

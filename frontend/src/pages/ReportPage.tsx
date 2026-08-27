@@ -157,6 +157,7 @@ function DonutChart({ data, centerLabel = "capacitados" }: DonutChartProps) {
 interface BarChartItem {
   label: string;
   value: number;
+  formattedValue?: string;
 }
 
 interface SimpleBarChartProps {
@@ -188,7 +189,7 @@ function SimpleBarChart({ data }: SimpleBarChartProps) {
                 { item.label }
               </Typography>
               <Typography sx={{ color: "#7A6252", fontSize: 14, fontWeight: 700, }}>
-                { item.value }
+                {item.formattedValue ?? item.value}
               </Typography>
             </Box>
             <Box sx={{ height: 14, borderRadius: 10, bgcolor: "#F7E8D8", overflow: "hidden", }}>
@@ -241,6 +242,28 @@ const getCurrentMonthRange = () => {
 
 const formatReportDate = (value: string) =>
   new Date(`${value}T00:00:00`).toLocaleDateString("es-CO");
+
+const formatTrainingDuration = (decimalHours?: number | null) => {
+  const numericHours = Number(decimalHours ?? 0);
+
+  if (!Number.isFinite(numericHours) || numericHours <= 0) {
+    return "0 min";
+  }
+
+  const totalMinutes = Math.round(numericHours * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) {
+    return `${minutes} min`;
+  }
+
+  if (minutes === 0) {
+    return `${hours} h`;
+  }
+
+  return `${hours} h ${minutes} min`;
+};
 
 export function ReportPage() {
   const [administrativeInductionReport, setAdministrativeInductionReport] = useState<AdministrativeInductionReportResponse | null>(null);
@@ -333,7 +356,7 @@ export function ReportPage() {
       }
 
       if (!trainingHoursResponse.isSuccess || !trainingHoursResponse.result) {
-        showResponseModal("error", "Error", trainingHoursResponse.Message || "No se pudo cargar el reporte de horas.");
+        showResponseModal("error", "Error", trainingHoursResponse.Message || "No se pudo cargar el reporte de tiempo de capacitación.");
         return;
       }
 
@@ -544,10 +567,17 @@ export function ReportPage() {
     const trainingDetailRowHeights = new Map<number, number>();
     const trainingSummaryRows: number[] = [];
     const collaboratorTotalRows: number[] = [];
+    const durationCells: Array<{ row: number; col: number }> = [];
 
     const addRow = (row: unknown[]) => {
       rows.push(row);
       return rows.length - 1;
+    };
+
+    const addDurationRow = (row: unknown[], durationColumn: number) => {
+      const index = addRow(row);
+      durationCells.push({ row: index, col: durationColumn });
+      return index;
     };
 
     const addBlankRow = () => addRow([]);
@@ -622,7 +652,7 @@ export function ReportPage() {
       "Fecha",
       "Cédula",
       "Colaborador",
-      "Horas",
+      "Tiempo",
     ]);
     const solutionCenterDetails = (report?.bySolutionCenter ?? []).flatMap(
       (solutionCenter) =>
@@ -635,14 +665,14 @@ export function ReportPage() {
       addRow(["No hay datos", "", "", "", "", 0]);
     } else {
       solutionCenterDetails.forEach((item) => {
-        addRow([
+        addDurationRow([
           item.nameSolutionCenter,
           item.titleEvent,
           item.dateEvent,
           item.documentNumberAttendancePerson,
           item.fullNameAttendancePerson,
           formatNumber(item.trainingHours),
-        ]);
+        ], 5);
       });
     }
 
@@ -666,76 +696,76 @@ export function ReportPage() {
       "Total de colaboradores internos capacitados en SST",
       formatNumber(sstReport?.summary.totalInternalSstTrainedPeople),
     ]);
-    addRow([
-      "Total de horas de capacitación en SST",
+    addDurationRow([
+      "Tiempo total de capacitación en SST",
       formatNumber(sstReport?.summary.totalSstTrainingHours),
-    ]);
-    addRow([
-      "Número de horas de capacitación en SST por colaborador interno",
+    ], 1);
+    addDurationRow([
+      "Tiempo promedio de capacitación en SST por colaborador interno",
       sstAverageHoursByCollaborator,
-    ]);
+    ], 1);
 
     addBlankRow();
     addHeader([
       "Documento",
       "Colaborador",
       "Centro de soluciones",
-      "Horas SST",
+      "Tiempo SST",
     ]);
     if ((sstReport?.byCollaborator ?? []).length === 0) {
       addRow(["No hay datos", "", "", 0]);
     } else {
       sstReport?.byCollaborator.forEach((item) => {
-        addRow([
+        addDurationRow([
           item.documentNumberAttendancePerson,
           item.fullNameAttendancePerson,
           item.nameSolutionCenter,
           formatNumber(item.totalSstTrainingHours),
-        ]);
+        ], 3);
       });
     }
 
-    addSection("HORAS DE CAPACITACIÓN");
+    addSection("TIEMPO DE CAPACITACIÓN");
     addHeader(["Indicador", "Valor"]);
-    addRow([
-      "Horas totales de capacitación",
+    addDurationRow([
+      "Tiempo total de capacitación",
       formatNumber(trainingHoursReport?.totalTrainingHours),
-    ]);
-    addRow([
-      "Horas totales de capacitación categoría: Múltiples funciones",
+    ], 1);
+    addDurationRow([
+      "Tiempo total de capacitación categoría: Múltiples funciones",
       formatNumber(trainingHoursReport?.totalMultipleFunctionsTrainingHours),
-    ]);
-    addRow([
-      "Horas totales de capacitación categoría: Cargo",
+    ], 1);
+    addDurationRow([
+      "Tiempo total de capacitación categoría: Cargo",
       formatNumber(trainingHoursReport?.totalPositionTrainingHours),
-    ]);
-    addRow([
-      "Horas totales de capacitación categoría: Personal",
+    ], 1);
+    addDurationRow([
+      "Tiempo total de capacitación categoría: Personal",
       formatNumber(trainingHoursReport?.totalPersonalTrainingHours),
-    ]);
-    addRow([
-      "Horas totales: Ser",
+    ], 1);
+    addDurationRow([
+      "Tiempo total: Ser",
       formatNumber(trainingHoursReport?.totalSerTrainingHours),
-    ]);
-    addRow([
-      "Horas totales: Hacer",
+    ], 1);
+    addDurationRow([
+      "Tiempo total: Hacer",
       formatNumber(trainingHoursReport?.totalHacerTrainingHours),
-    ]);
-    addRow([
-      "Horas totales de capacitación a personal interno",
+    ], 1);
+    addDurationRow([
+      "Tiempo total de capacitación a personal interno",
       formatNumber(trainingHoursReport?.totalInternalTrainingHours),
-    ]);
-    addRow([
-      "Horas totales de capacitación a personal externo",
+    ], 1);
+    addDurationRow([
+      "Tiempo total de capacitación a personal externo",
       formatNumber(trainingHoursReport?.totalExternalTrainingHours),
-    ]);
+    ], 1);
 
     addSection("INDUCCIÓN A PERSONAL NUEVO");
     addHeader(["Indicador", "Valor"]);
-    addRow([
-      "Horas totales inducción personal nuevo",
+    addDurationRow([
+      "Tiempo total de inducción a personal nuevo",
       formatNumber(newStaffInductionReport?.totalNewStaffInductionHours),
-    ]);
+    ], 1);
     addRow([
       "Total de personal capacitado en inducción a personal nuevo",
       formatNumber(newStaffInductionReport?.totalNewStaffInductionPeople),
@@ -743,10 +773,10 @@ export function ReportPage() {
 
     addSection("INDUCCIÓN A PERSONAL ADMINISTRATIVO");
     addHeader(["Indicador", "Valor"]);
-    addRow([
-      "Horas totales en inducción a personal administrativo",
+    addDurationRow([
+      "Tiempo total de inducción a personal administrativo",
       formatNumber(administrativeInductionReport?.totalAdministrativeInductionHours),
-    ]);
+    ], 1);
     addRow([
       "Total de personal capacitado en inducción a personal administrativo",
       formatNumber(administrativeInductionReport?.totalAdministrativeInductionPeople),
@@ -754,26 +784,26 @@ export function ReportPage() {
 
     addSection("CAPACITACIONES TRANSVERSALES");
     addHeader(["Indicador", "Valor"]);
-    addRow([
-      "Horas totales de capacitación transversal",
+    addDurationRow([
+      "Tiempo total de capacitación transversal",
       formatNumber(transversalTrainingReport?.totalTransversalTrainingHours),
-    ]);
+    ], 1);
     addRow([
       "Personal capacitado en transversales",
       formatNumber(transversalTrainingReport?.totalTransversalTrainingPeople),
     ]);
     addBlankRow();
-    addHeader(["Cédula", "Colaborador", "Centro de soluciones", "Horas"]);
+    addHeader(["Cédula", "Colaborador", "Centro de soluciones", "Tiempo"]);
     if ((transversalTrainingReport?.byCollaborator ?? []).length === 0) {
       addRow(["No hay datos", "", "", 0]);
     } else {
       transversalTrainingReport?.byCollaborator.forEach((item) => {
-        addRow([
+        addDurationRow([
           item.documentNumberAttendancePerson,
           item.fullNameAttendancePerson,
           item.nameSolutionCenter,
           formatNumber(item.totalTransversalTrainingHours),
-        ]);
+        ], 3);
       });
     }
 
@@ -807,14 +837,14 @@ export function ReportPage() {
         "Total colaboradores vinculados a la compañía",
         formatNumber(averageTrainingTimeReport.totalWorkers),
       ]);
-      addRow([
-        "Horas totales capacitación personal interno",
+      addDurationRow([
+        "Tiempo total de capacitación personal interno",
         formatNumber(averageTrainingTimeReport.totalInternalTrainingHours),
-      ]);
-      addRow([
-        "Promedio de horas por colaborador",
+      ], 1);
+      addDurationRow([
+        "Promedio tiempo por colaborador",
         formatNumber(averageTrainingTimeReport.averageTrainingHoursPerWorker),
-      ]);
+      ], 1);
     }
 
     if (collaboratorReport) {
@@ -835,7 +865,7 @@ export function ReportPage() {
           addBlankRow();
           addHistorySubsection("DETALLE DE CAPACITACIONES");
           addHeader(
-            ["Capacitación", "Centro formador", "Fecha", "Horas"],
+            ["Capacitación", "Centro formador", "Fecha", "Tiempo"],
             3
           );
 
@@ -843,12 +873,12 @@ export function ReportPage() {
             addRow(["No hay datos"]);
           } else {
             collaborator.trainings.forEach((training) => {
-              const trainingRow = addRow([
+              const trainingRow = addDurationRow([
                 training.titleEvent,
                 training.nameSolutionCenter,
                 training.dateEvent,
                 training.trainingHours,
-              ]);
+              ], 3);
               const estimatedLines = Math.max(
                 1,
                 Math.ceil(training.titleEvent.length / 45),
@@ -866,7 +896,7 @@ export function ReportPage() {
           addBlankRow();
           addHistorySubsection("RESUMEN POR CENTRO FORMADOR");
           addHeader(
-            ["Centro formador", "Total capacitaciones", "Total horas"],
+            ["Centro formador", "Total capacitaciones", "Tiempo total"],
             2
           );
 
@@ -874,19 +904,19 @@ export function ReportPage() {
             addRow(["No hay datos"]);
           } else {
             collaborator.byTrainingSolutionCenter.forEach((solutionCenter) => {
-              trainingSummaryRows.push(addRow([
+              trainingSummaryRows.push(addDurationRow([
                 solutionCenter.nameSolutionCenter,
                 solutionCenter.totalTrainings,
                 solutionCenter.totalTrainingHours,
-              ]));
+              ], 2));
             });
           }
 
-          collaboratorTotalRows.push(addRow([
+          collaboratorTotalRows.push(addDurationRow([
             "TOTAL GENERAL",
             collaborator.totalTrainings,
             collaborator.totalTrainingHours,
-          ]));
+          ], 2));
 
           if (index < collaboratorReport.collaborators.length - 1) {
             addBlankRow();
@@ -1003,10 +1033,13 @@ export function ReportPage() {
       numFmt: "0",
     };
 
-    const hoursCellStyle = {
+    const excelDurationNumberFormat =
+      '[>=0.0416666667][h]" h "mm" min";[m]" min"';
+
+    const durationCellStyle = {
       ...cellStyle,
       alignment: { horizontal: "right", vertical: "center" },
-      numFmt: "0.00",
+      numFmt: excelDurationNumberFormat,
     };
 
     const collaboratorTotalStyle = {
@@ -1064,13 +1097,13 @@ export function ReportPage() {
     trainingDetailRows.forEach((row) => {
       styleFullRow(row, cellStyle, 0, 3);
       setStyle(row, 2, dateCellStyle);
-      setStyle(row, 3, hoursCellStyle);
+      setStyle(row, 3, durationCellStyle);
     });
 
     trainingSummaryRows.forEach((row) => {
       styleFullRow(row, cellStyle, 0, 2);
       setStyle(row, 1, integerCellStyle);
-      setStyle(row, 2, hoursCellStyle);
+      setStyle(row, 2, durationCellStyle);
     });
 
     collaboratorTotalRows.forEach((row) => {
@@ -1083,7 +1116,7 @@ export function ReportPage() {
       setStyle(row, 2, {
         ...collaboratorTotalStyle,
         alignment: { horizontal: "right", vertical: "center" },
-        numFmt: "0.00",
+        numFmt: excelDurationNumberFormat,
       });
     });
 
@@ -1108,6 +1141,39 @@ export function ReportPage() {
           : cellStyle;
       }
     }
+
+    durationCells.forEach(({ row, col }) => {
+      const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+      const durationCell = worksheet[cellAddress] as
+        | (XLSX.CellObject & {
+            s?: Record<string, unknown> & {
+              alignment?: Record<string, unknown>;
+            };
+          })
+        | undefined;
+
+      if (!durationCell) return;
+
+      const decimalHours = Number(durationCell.v ?? 0);
+      const totalMinutes = Number.isFinite(decimalHours)
+        ? Math.max(0, Math.round(decimalHours * 60))
+        : 0;
+      const currentStyle = durationCell.s ?? cellStyle;
+
+      durationCell.t = "n";
+      durationCell.v = totalMinutes / 1440;
+      durationCell.z = excelDurationNumberFormat;
+      delete durationCell.w;
+      durationCell.s = {
+        ...currentStyle,
+        alignment: {
+          ...(currentStyle.alignment ?? {}),
+          horizontal: "right",
+          vertical: "center",
+        },
+        numFmt: excelDurationNumberFormat,
+      };
+    });
 
     worksheet["!rows"] = rows.map((_, index) => {
       let height = 20;
@@ -1198,12 +1264,16 @@ export function ReportPage() {
       value: sstReport?.summary.totalInternalSstTrainedPeople ?? 0,
     },
     {
-      label: "Horas totales SST",
+      label: "Tiempo total SST",
       value: sstReport?.summary.totalSstTrainingHours ?? 0,
+      formattedValue: formatTrainingDuration(
+        sstReport?.summary.totalSstTrainingHours
+      ),
     },
     {
-      label: "Horas por colaborador",
+      label: "Tiempo por colaborador",
       value: sstAverageHoursByCollaborator,
+      formattedValue: formatTrainingDuration(sstAverageHoursByCollaborator),
     },
   ];
 
@@ -1452,7 +1522,7 @@ export function ReportPage() {
                                         <TableCell sx={{ fontWeight: 700 }}>Fecha</TableCell>
                                         <TableCell sx={{ fontWeight: 700 }}>Cédula</TableCell>
                                         <TableCell sx={{ fontWeight: 700 }}>Colaborador</TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 700 }}>Horas</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700 }}>Tiempo</TableCell>
                                       </TableRow>
                                     </TableHead>
                                     <TableBody>
@@ -1469,7 +1539,9 @@ export function ReportPage() {
                                             <TableCell>{formatReportDate(detail.dateEvent)}</TableCell>
                                             <TableCell>{detail.documentNumberAttendancePerson}</TableCell>
                                             <TableCell>{detail.fullNameAttendancePerson}</TableCell>
-                                            <TableCell align="right">{detail.trainingHours}</TableCell>
+                                            <TableCell align="right">
+                                              {formatTrainingDuration(detail.trainingHours)}
+                                            </TableCell>
                                           </TableRow>
                                         ))
                                       )}
@@ -1528,10 +1600,12 @@ export function ReportPage() {
                   </Box>
                   <Box>
                     <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                      Total de horas de capacitación SST
+                      Tiempo total de capacitación SST
                     </Typography>
                     <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                      {sstReport?.summary.totalSstTrainingHours ?? 0}
+                      {formatTrainingDuration(
+                        sstReport?.summary.totalSstTrainingHours
+                      )}
                     </Typography>
                   </Box>
                 </Box>
@@ -1545,10 +1619,10 @@ export function ReportPage() {
                   </Box>
                   <Box>
                     <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                      Horas SST por colaborador interno
+                      Tiempo SST por colaborador interno
                     </Typography>
                     <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                      {sstAverageHoursByCollaborator}
+                      {formatTrainingDuration(sstAverageHoursByCollaborator)}
                     </Typography>
                   </Box>
                 </Box>
@@ -1565,7 +1639,7 @@ export function ReportPage() {
             <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, overflow: "hidden", bgcolor: "#FFFDF8" }}>
               <Box sx={{ p: 2 }}>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 18, fontWeight: 700 }}>
-                  Horas SST por colaborador interno
+                  Tiempo SST por colaborador interno
                 </Typography>
               </Box>
               <Table size="small">
@@ -1581,7 +1655,7 @@ export function ReportPage() {
                       Centro
                     </TableCell>
                     <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>
-                      Horas
+                      Tiempo
                     </TableCell>
                   </TableRow>
                 </TableHead>
@@ -1598,7 +1672,9 @@ export function ReportPage() {
                         <TableCell>{item.documentNumberAttendancePerson}</TableCell>
                         <TableCell>{item.fullNameAttendancePerson}</TableCell>
                         <TableCell>{item.nameSolutionCenter}</TableCell>
-                        <TableCell align="right">{item.totalSstTrainingHours}</TableCell>
+                        <TableCell align="right">
+                          {formatTrainingDuration(item.totalSstTrainingHours)}
+                        </TableCell>
                       </TableRow>
                     ))
                   )}
@@ -1608,87 +1684,103 @@ export function ReportPage() {
           </Box>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 2 }}>
             <Typography sx={{ color: "#4B2E1F", fontSize: 22, fontWeight: 800 }}>
-              Horas de capacitación
+              Tiempo de capacitación
             </Typography>
           </Box>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr 1fr", }, gap: 2, }}>
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Horas totales de capacitación
+                  Tiempo total de capacitación
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                  {trainingHoursReport?.totalTrainingHours ?? 0}
+                  {formatTrainingDuration(
+                    trainingHoursReport?.totalTrainingHours
+                  )}
                 </Typography>
               </CardContent>
             </Card>
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Horas categoría: Múltiples funciones
+                  Tiempo categoría: Múltiples funciones
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                  {trainingHoursReport?.totalMultipleFunctionsTrainingHours ?? 0}
+                  {formatTrainingDuration(
+                    trainingHoursReport?.totalMultipleFunctionsTrainingHours
+                  )}
                 </Typography>
               </CardContent>
             </Card>
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Horas categoría: Cargo
+                  Tiempo categoría: Cargo
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                  {trainingHoursReport?.totalPositionTrainingHours ?? 0}
+                  {formatTrainingDuration(
+                    trainingHoursReport?.totalPositionTrainingHours
+                  )}
                 </Typography>
               </CardContent>
             </Card>
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Horas categoría: Personal
+                  Tiempo categoría: Personal
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                  {trainingHoursReport?.totalPersonalTrainingHours ?? 0}
+                  {formatTrainingDuration(
+                    trainingHoursReport?.totalPersonalTrainingHours
+                  )}
                 </Typography>
               </CardContent>
             </Card>
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Horas programa: Ser
+                  Tiempo programa: Ser
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                  {trainingHoursReport?.totalSerTrainingHours ?? 0}
+                  {formatTrainingDuration(
+                    trainingHoursReport?.totalSerTrainingHours
+                  )}
                 </Typography>
               </CardContent>
             </Card>
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Horas programa: Hacer
+                  Tiempo programa: Hacer
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                  {trainingHoursReport?.totalHacerTrainingHours ?? 0}
+                  {formatTrainingDuration(
+                    trainingHoursReport?.totalHacerTrainingHours
+                  )}
                 </Typography>
               </CardContent>
             </Card>
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Horas totales de capacitación a personal interno
+                  Tiempo total de capacitación a personal interno
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                  {trainingHoursReport?.totalInternalTrainingHours ?? 0}
+                  {formatTrainingDuration(
+                    trainingHoursReport?.totalInternalTrainingHours
+                  )}
                 </Typography>
               </CardContent>
             </Card>
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Horas totales de capacitación a personal externo
+                  Tiempo total de capacitación a personal externo
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                  {trainingHoursReport?.totalExternalTrainingHours ?? 0}
+                  {formatTrainingDuration(
+                    trainingHoursReport?.totalExternalTrainingHours
+                  )}
                 </Typography>
               </CardContent>
             </Card>
@@ -1707,10 +1799,12 @@ export function ReportPage() {
                   </Box>
                   <Box>
                     <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                      Horas totales inducción personal nuevo
+                      Tiempo total de inducción a personal nuevo
                     </Typography>
                     <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                      {newStaffInductionReport?.totalNewStaffInductionHours ?? 0}
+                      {formatTrainingDuration(
+                        newStaffInductionReport?.totalNewStaffInductionHours
+                      )}
                     </Typography>
                   </Box>
                 </Box>
@@ -1748,10 +1842,12 @@ export function ReportPage() {
                   </Box>
                   <Box>
                     <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                      Horas totales en inducción a personal administrativo
+                      Tiempo total de inducción a personal administrativo
                     </Typography>
                     <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                      {administrativeInductionReport?.totalAdministrativeInductionHours ?? 0}
+                      {formatTrainingDuration(
+                        administrativeInductionReport?.totalAdministrativeInductionHours
+                      )}
                     </Typography>
                   </Box>
                 </Box>
@@ -1789,10 +1885,12 @@ export function ReportPage() {
                   </Box>
                   <Box>
                     <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                      Horas totales de capacitación transversal
+                      Tiempo total de capacitación transversal
                     </Typography>
                     <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                      {transversalTrainingReport?.totalTransversalTrainingHours ?? 0}
+                      {formatTrainingDuration(
+                        transversalTrainingReport?.totalTransversalTrainingHours
+                      )}
                     </Typography>
                   </Box>
                 </Box>
@@ -1829,7 +1927,7 @@ export function ReportPage() {
                     <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Cédula</TableCell>
                     <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Colaborador</TableCell>
                     <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Centro de soluciones</TableCell>
-                    <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Horas</TableCell>
+                    <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Tiempo</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1845,7 +1943,11 @@ export function ReportPage() {
                         <TableCell>{item.documentNumberAttendancePerson}</TableCell>
                         <TableCell>{item.fullNameAttendancePerson}</TableCell>
                         <TableCell>{item.nameSolutionCenter}</TableCell>
-                        <TableCell align="right">{item.totalTransversalTrainingHours}</TableCell>
+                        <TableCell align="right">
+                          {formatTrainingDuration(
+                            item.totalTransversalTrainingHours
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))
                   )}
@@ -1955,20 +2057,24 @@ export function ReportPage() {
               <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8", }}>
                 <CardContent>
                   <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                    Horas totales capacitación personal interno
+                    Tiempo total de capacitación personal interno
                   </Typography>
                   <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                    {averageTrainingTimeReport?.totalInternalTrainingHours ?? 0}
+                    {formatTrainingDuration(
+                      averageTrainingTimeReport?.totalInternalTrainingHours
+                    )}
                   </Typography>
                 </CardContent>
               </Card>
               <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8", }}>
                 <CardContent>
                   <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                    Promedio horas por colaborador
+                    Promedio tiempo por colaborador
                   </Typography>
                   <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                    {(averageTrainingTimeReport?.averageTrainingHoursPerWorker ?? 0).toFixed(4)}
+                    {formatTrainingDuration(
+                      averageTrainingTimeReport?.averageTrainingHoursPerWorker
+                    )}
                   </Typography>
                 </CardContent>
               </Card>
@@ -1982,7 +2088,7 @@ export function ReportPage() {
               Historial de capacitación por colaborador
             </Typography>
             <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-              Consulta por nombre o cédula y revisa sus horas y capacitaciones por centro de soluciones.
+              Consulta por nombre o cédula y revisa sus tiempos y capacitaciones por centro de soluciones.
             </Typography>
           </Box>
           <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, p: 2, bgcolor: "#FFFDF8" }}>
@@ -2064,7 +2170,7 @@ export function ReportPage() {
                         <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Colaborador</TableCell>
                         <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Centro del colaborador</TableCell>
                         <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Capacitaciones</TableCell>
-                        <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Horas</TableCell>
+                        <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Tiempo</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -2089,7 +2195,9 @@ export function ReportPage() {
                             <TableCell>{item.fullNameAttendancePerson}</TableCell>
                             <TableCell>{item.nameSolutionCenter}</TableCell>
                             <TableCell align="right">{item.totalTrainings}</TableCell>
-                            <TableCell align="right">{item.totalTrainingHours}</TableCell>
+                            <TableCell align="right">
+                              {formatTrainingDuration(item.totalTrainingHours)}
+                            </TableCell>
                           </TableRow>
                         );
                       })}
@@ -2114,10 +2222,12 @@ export function ReportPage() {
                     <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
                       <CardContent>
                         <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                          Total de horas acumuladas
+                          Tiempo total acumulado
                         </Typography>
                         <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                          {selectedCollaborator.totalTrainingHours}
+                          {formatTrainingDuration(
+                            selectedCollaborator.totalTrainingHours
+                          )}
                         </Typography>
                       </CardContent>
                     </Card>
@@ -2142,7 +2252,7 @@ export function ReportPage() {
                               <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Capacitación</TableCell>
                               <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Fecha</TableCell>
                               <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Centro formador</TableCell>
-                              <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Horas</TableCell>
+                              <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Tiempo</TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
@@ -2151,7 +2261,9 @@ export function ReportPage() {
                                 <TableCell>{training.titleEvent}</TableCell>
                                 <TableCell>{formatReportDate(training.dateEvent)}</TableCell>
                                 <TableCell>{training.nameSolutionCenter}</TableCell>
-                                <TableCell align="right">{training.trainingHours}</TableCell>
+                                <TableCell align="right">
+                                  {formatTrainingDuration(training.trainingHours)}
+                                </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
