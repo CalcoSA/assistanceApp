@@ -53,3 +53,9 @@ Thumbs.db
 # ======================
 backend/uploads/
 uploads/
+
+
+# OnlyOffice local data
+onlyoffice/logs/
+onlyoffice/data/
+onlyoffice/lib/

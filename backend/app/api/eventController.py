@@ -1,10 +1,14 @@
 from app.domain.dtos.EventDto import (EventCreateDto, EventUpdateDto, EventResponseDto, EventQrResponseDto, EventAttendanceResponseDto, EventPaginatedResponseDto)
 from app.infrastructure.repositories.EventRepository import EventRepository
+from app.infrastructure.repositories.ParameterRepository import ParameterRepository
+from app.infrastructure.repositories.WordpressUserRepository import WordpressUserRepository
 from app.application.interfaces.IEventApplication import IEventApplication
 from app.application.services.EventApplication import EventApplication
+from app.application.services.EventNotificationApplication import EventNotificationApplication
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.infrastructure.logging.loggerConfig import getLogger
+from app.infrastructure.db.wordpressConnection import getWordpressDb
 from app.application.services.JwtService import JwtService
 from app.domain.dtos.ApiResponseDto import apiResponseDto
 from app.infrastructure.db.connection import getDb
@@ -18,9 +22,18 @@ router = APIRouter(prefix="/events", tags=["events"])
 security = HTTPBearer()
 logger = getLogger(__name__)
 
-def getEventApplication(db: Session = Depends(getDb)) -> IEventApplication:
+def getEventApplication(
+    db: Session = Depends(getDb),
+    wpDb: Session = Depends(getWordpressDb),
+) -> IEventApplication:
     eventRepository = EventRepository(db)
-    return EventApplication(eventRepository)
+    parameterRepository = ParameterRepository(db)
+    wordpressUserRepository = WordpressUserRepository(wpDb)
+    eventNotificationApplication = EventNotificationApplication(
+        parameterRepository,
+        wordpressUserRepository,
+    )
+    return EventApplication(eventRepository, eventNotificationApplication)
 
 def getCurrentAuthContext(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     payload = JwtService.decodeToken(credentials.credentials)
@@ -88,7 +101,8 @@ def createEvent(eventData: EventCreateDto, authContext: dict = Depends(getCurren
     try:
         logger.info("Creando evento | title=%s | userLogin=%s", eventData.titleEvent, authContext["userLogin"])
         data = service.create(eventData, authContext["userLogin"], authContext["roles"])
-        return apiResponseDto(isSuccess=True, Message="Evento creado correctamente.", result=data)
+        message = data.notificationMessage or "Evento creado correctamente."
+        return apiResponseDto(isSuccess=True, Message=message, result=data)
 
     except PermissionError as e:
         logger.warning("Permiso denegado creando evento | userLogin=%s | error=%s", authContext["userLogin"], str(e))

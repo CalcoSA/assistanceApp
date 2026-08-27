@@ -15,6 +15,8 @@ from app.domain.dtos.ReportDto import (
     TrainingHoursReportResponseDto,
     NewStaffInductionReportResponseDto,
     AdministrativeInductionReportResponseDto,
+    TransversalTrainingReportResponseDto,
+    CollaboratorTrainingReportResponseDto,
     GeneralReportResponseDto,
     AverageTrainingTimeReportResponseDto
 )
@@ -100,6 +102,18 @@ def getAdministrativeInductionReport(dateFrom: Optional[date] = Query(None), dat
     except Exception:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al obtener el reporte de inducción a personal administrativo.",)
     
+@router.get("/transversal-training", response_model=apiResponseDto[TransversalTrainingReportResponseDto])
+def getTransversalTrainingReport(dateFrom: Optional[date] = Query(None), dateTo: Optional[date] = Query(None), authContext: dict = Depends(getCurrentAuthContext), service: IReportApplication = Depends(getReportApplication),):
+    try:
+        data = service.getTransversalTrainingReport(dateFrom, dateTo)
+        return apiResponseDto(isSuccess=True, Message="Reporte de capacitaciones transversales obtenido correctamente.", result=data,)
+
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e),)
+
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al obtener el reporte de capacitaciones transversales.",)
+
 @router.get("/general", response_model=apiResponseDto[GeneralReportResponseDto])
 def getGeneralReport(dateFrom: Optional[date] = Query(None), dateTo: Optional[date] = Query(None), authContext: dict = Depends(getCurrentAuthContext), service: IReportApplication = Depends(getReportApplication),):
     try:
@@ -112,6 +126,18 @@ def getGeneralReport(dateFrom: Optional[date] = Query(None), dateTo: Optional[da
     except Exception:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al obtener el reporte general.",)
     
+@router.get("/collaborator-training", response_model=apiResponseDto[CollaboratorTrainingReportResponseDto])
+def getCollaboratorTrainingReport(search: str = Query(..., min_length=1, max_length=200), dateFrom: Optional[date] = Query(None), dateTo: Optional[date] = Query(None), authContext: dict = Depends(getCurrentAuthContext), service: IReportApplication = Depends(getReportApplication),):
+    try:
+        data = service.getCollaboratorTrainingReport(search, dateFrom, dateTo)
+        return apiResponseDto(isSuccess=True, Message="Historial de capacitaciones del colaborador obtenido correctamente.", result=data,)
+
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e),)
+
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al obtener el historial de capacitaciones del colaborador.",)
+
 @router.get("/average-training-time", response_model=apiResponseDto[AverageTrainingTimeReportResponseDto])
 def getAverageTrainingTimeReport(totalWorkers: int = Query(..., gt=0), dateFrom: Optional[date] = Query(None), dateTo: Optional[date] = Query(None), authContext: dict = Depends(getCurrentAuthContext), service: IReportApplication = Depends(getReportApplication),):
     try:

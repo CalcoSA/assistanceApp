@@ -1,11 +1,12 @@
 from app.domain.dtos.EventDto import (EventCreateDto, EventQrResponseDto, EventResponseDto, EventUpdateDto, EventPaginatedResponseDto)
 from app.application.interfaces.IEventApplication import IEventApplication
+from app.application.interfaces.IEventNotificationApplication import IEventNotificationApplication
 from app.domain.interfaces.IEventRepository import IEventRepository
 from app.domain.dtos.EventDto import EventAttendanceResponseDto
-from app.infrastructure.db.config import settings
+from app.infrastructure.db.config import APP_TIMEZONE_INFO, settings
 from app.domain.entities.Event import Event
 from fastapi import UploadFile
-from datetime import datetime
+from datetime import datetime, time
 import qrcode
 import uuid
 import os
@@ -20,9 +21,20 @@ class EventApplication(IEventApplication):
     STATUS_CANCELLED_NAME = "cancelado"
     VIEW_ALL_ROLES = ["administrador"]
     CREATE_EVENT_ROLES = ["administrador", "formador"]
+    FACILITATOR_TYPE_INTERNAL = "INTERNO"
+    FACILITATOR_TYPE_EXTERNAL = "EXTERNO"
+    FACILITATOR_TYPES = {
+        FACILITATOR_TYPE_INTERNAL,
+        FACILITATOR_TYPE_EXTERNAL,
+    }
 
-    def __init__(self, eventRepository: IEventRepository):
+    def __init__(
+        self,
+        eventRepository: IEventRepository,
+        eventNotificationApplication: IEventNotificationApplication | None = None,
+    ):
         self.eventRepository = eventRepository
+        self.eventNotificationApplication = eventNotificationApplication
 
         publicBaseUrl = settings.PUBLIC_BASE_URL
         self.publicAttendanceBaseUrl = f"{publicBaseUrl.rstrip('/')}/attendance"
@@ -89,8 +101,18 @@ class EventApplication(IEventApplication):
             raise PermissionError("No tiene permisos para crear eventos.")
 
         self._validateCreateData(eventData)
+        facilitatorData = self._normalizeEventFacilitators(
+            facilitatorName=eventData.facilitatorNameEvent,
+            facilitatorType=eventData.facilitatorTypeEvent,
+            facilitatorCompany=eventData.facilitatorCompanyEvent,
+            facilitatorPosition=eventData.facilitatorPositionEvent,
+            secondFacilitatorName=eventData.secondFacilitatorNameEvent,
+            secondFacilitatorType=eventData.secondFacilitatorTypeEvent,
+            secondFacilitatorCompany=eventData.secondFacilitatorCompanyEvent,
+            secondFacilitatorPosition=eventData.secondFacilitatorPositionEvent,
+        )
 
-        createdAt = datetime.now()
+        createdAt = self._currentDateTime()
         attendanceStartDateTime = createdAt
         attendanceEndDateTime = datetime.combine(eventData.dateEvent, eventData.endTimeEvent)
 
@@ -100,12 +122,16 @@ class EventApplication(IEventApplication):
         tokenEvent = uuid.uuid4().hex
         publicUrlEvent = f"{self.publicAttendanceBaseUrl}/{tokenEvent}"
         qrPathEvent = self._generateQr(tokenEvent, publicUrlEvent)
+        uppercaseTopics = [topic.strip().upper() for topic in eventData.topics if topic.strip()]
 
         newEvent = Event(
-            titleEvent=eventData.titleEvent.strip(),
-            descriptionEvent=eventData.descriptionEvent,
+            titleEvent=eventData.titleEvent.strip().upper(),
+            descriptionEvent=self._uppercaseOptionalText(eventData.descriptionEvent),
             dateEvent=eventData.dateEvent,
-            durationEvent=eventData.durationEvent,
+            durationEvent=self._calculateDuration(
+                eventData.startTimeEvent,
+                eventData.endTimeEvent,
+            ),
             startTimeEvent=eventData.startTimeEvent,
             endTimeEvent=eventData.endTimeEvent,
             IdSolutionCenter=eventData.IdSolutionCenter,
@@ -113,16 +139,11 @@ class EventApplication(IEventApplication):
             IdSpecificTrainingProgram=eventData.IdSpecificTrainingProgram,
             IdEventCategory=eventData.IdEventCategory,
             IdEventStatus=self.STATUS_ACTIVE,
-            facilitatorNameEvent=eventData.facilitatorNameEvent,
-            facilitatorCompanyEvent=eventData.facilitatorCompanyEvent,
-            facilitatorPositionEvent=eventData.facilitatorPositionEvent,
-            secondFacilitatorNameEvent=eventData.secondFacilitatorNameEvent,
-            secondFacilitatorCompanyEvent=eventData.secondFacilitatorCompanyEvent,
-            secondFacilitatorPositionEvent=eventData.secondFacilitatorPositionEvent,
+            **facilitatorData,
             scheduledPeopleNumber=eventData.scheduledPeopleNumber,
             attendedPeopleNumber=None,
-            observationsEvent=eventData.observationsEvent,
-            eventPlace=eventData.eventPlace,
+            observationsEvent=self._uppercaseOptionalText(eventData.observationsEvent),
+            eventPlace=self._uppercaseOptionalText(eventData.eventPlace),
             attendanceStartDateTime=attendanceStartDateTime,
             attendanceEndDateTime=attendanceEndDateTime,
             tokenEvent=tokenEvent,
@@ -134,9 +155,22 @@ class EventApplication(IEventApplication):
             createdAt=createdAt
         )
 
-        eventCreated = self.eventRepository.create(newEvent, eventData.topics, eventData.competencies)
+        eventCreated = self.eventRepository.create(newEvent, uppercaseTopics, eventData.competencies)
 
-        return self._buildResponse(eventCreated)
+        response = self._buildResponse(eventCreated)
+
+        if self.eventNotificationApplication:
+            notificationResult = self.eventNotificationApplication.notifyEventCreated(
+                response
+            )
+            response = response.model_copy(
+                update={
+                    "notificationEmailSent": notificationResult.sent,
+                    "notificationMessage": notificationResult.message,
+                }
+            )
+
+        return response
 
     def update(self, IdEvent: int, eventData: EventUpdateDto, userLogin: str, roles: list[str]):
         eventFound = self.eventRepository.getById(IdEvent)
@@ -153,11 +187,70 @@ class EventApplication(IEventApplication):
             raise ValueError("No se puede actualizar un evento cancelado.")
 
         if self._eventHasStarted(eventFound):
-            self._validateUpdateAfterEventStarted(eventData)
+            self._validateUpdateAfterEventStarted(eventData, eventFound)
         else:
             self._validateUpdateBeforeEventStarted(eventData, eventFound)
 
-        updateData = eventData.model_dump(exclude_unset=True, exclude={"topics", "competencies"})
+        facilitatorData = self._normalizeEventFacilitators(
+            facilitatorName=self._getFinalUpdateValue(
+                eventData,
+                "facilitatorNameEvent",
+                eventFound.facilitatorNameEvent,
+            ),
+            facilitatorType=self._getFinalUpdateValue(
+                eventData,
+                "facilitatorTypeEvent",
+                self._inferFacilitatorType(
+                    eventFound.facilitatorNameEvent,
+                    eventFound.facilitatorCompanyEvent,
+                ),
+            ),
+            facilitatorCompany=self._getFinalUpdateValue(
+                eventData,
+                "facilitatorCompanyEvent",
+                eventFound.facilitatorCompanyEvent,
+            ),
+            facilitatorPosition=self._getFinalUpdateValue(
+                eventData,
+                "facilitatorPositionEvent",
+                eventFound.facilitatorPositionEvent,
+            ),
+            secondFacilitatorName=self._getFinalUpdateValue(
+                eventData,
+                "secondFacilitatorNameEvent",
+                eventFound.secondFacilitatorNameEvent,
+            ),
+            secondFacilitatorType=self._getFinalUpdateValue(
+                eventData,
+                "secondFacilitatorTypeEvent",
+                self._inferFacilitatorType(
+                    eventFound.secondFacilitatorNameEvent,
+                    eventFound.secondFacilitatorCompanyEvent,
+                ),
+            ),
+            secondFacilitatorCompany=self._getFinalUpdateValue(
+                eventData,
+                "secondFacilitatorCompanyEvent",
+                eventFound.secondFacilitatorCompanyEvent,
+            ),
+            secondFacilitatorPosition=self._getFinalUpdateValue(
+                eventData,
+                "secondFacilitatorPositionEvent",
+                eventFound.secondFacilitatorPositionEvent,
+            ),
+        )
+
+        updateData = eventData.model_dump(
+            exclude_unset=True,
+            exclude={
+                "topics",
+                "competencies",
+                "durationEvent",
+                "facilitatorTypeEvent",
+                "secondFacilitatorTypeEvent",
+            },
+        )
+        updateData.update(facilitatorData)
 
         if "titleEvent" in updateData and updateData["titleEvent"] is not None:
             updateData["titleEvent"] = updateData["titleEvent"].strip()
@@ -173,6 +266,23 @@ class EventApplication(IEventApplication):
             if eventData.endTimeEvent is not None
             else eventFound.endTimeEvent
         )
+
+        finalStartTimeEvent = (
+            eventData.startTimeEvent
+            if eventData.startTimeEvent is not None
+            else eventFound.startTimeEvent
+        )
+
+        scheduleTimeChanged = (
+            finalStartTimeEvent != eventFound.startTimeEvent
+            or finalEndTimeEvent != eventFound.endTimeEvent
+        )
+
+        if scheduleTimeChanged:
+            updateData["durationEvent"] = self._calculateDuration(
+                finalStartTimeEvent,
+                finalEndTimeEvent,
+            )
 
         if eventData.dateEvent is not None or eventData.endTimeEvent is not None:
             updateData["attendanceEndDateTime"] = datetime.combine(finalDateEvent, finalEndTimeEvent)
@@ -247,6 +357,11 @@ class EventApplication(IEventApplication):
         if not eventData.titleEvent.strip():
             raise ValueError("El título del evento es obligatorio.")
 
+        eventStartDateTime = datetime.combine(eventData.dateEvent, eventData.startTimeEvent)
+
+        if eventStartDateTime <= self._currentDateTime():
+            raise ValueError("La fecha y hora de inicio deben ser posteriores a la fecha y hora actual.")
+
         if eventData.startTimeEvent >= eventData.endTimeEvent:
             raise ValueError("La hora inicial del evento debe ser menor a la hora final.")
         
@@ -283,14 +398,27 @@ class EventApplication(IEventApplication):
         if finalEndDateTime <= datetime.now():
             raise ValueError("La fecha y hora final del evento debe ser mayor a la fecha y hora actual.")
 
-    def _validateUpdateAfterEventStarted(self, eventData: EventUpdateDto) -> None:
-        if eventData.dateEvent is not None:
+    def _validateUpdateAfterEventStarted(
+        self,
+        eventData: EventUpdateDto,
+        eventFound: Event,
+    ) -> None:
+        if (
+            eventData.dateEvent is not None
+            and eventData.dateEvent != eventFound.dateEvent
+        ):
             raise ValueError("No se puede reagendar un evento que ya inició.")
 
-        if eventData.startTimeEvent is not None:
+        if (
+            eventData.startTimeEvent is not None
+            and eventData.startTimeEvent != eventFound.startTimeEvent
+        ):
             raise ValueError("No se puede cambiar la hora de inicio de un evento que ya inició.")
 
-        if eventData.endTimeEvent is not None:
+        if (
+            eventData.endTimeEvent is not None
+            and eventData.endTimeEvent != eventFound.endTimeEvent
+        ):
             raise ValueError("No se puede cambiar la hora final de un evento que ya inició.")
 
     def _eventHasStarted(self, event: Event) -> bool:
@@ -319,6 +447,155 @@ class EventApplication(IEventApplication):
 
     def _normalizeText(self, value: str | None) -> str:
         return value.strip().lower() if value else ""
+
+    def _currentDateTime(self) -> datetime:
+        return datetime.now(APP_TIMEZONE_INFO).replace(tzinfo=None)
+
+    def _uppercaseOptionalText(self, value: str | None) -> str | None:
+        return value.strip().upper() if value is not None else None
+
+    def _calculateDuration(self, startTime: time, endTime: time) -> str:
+        startMinutes = startTime.hour * 60 + startTime.minute
+        endMinutes = endTime.hour * 60 + endTime.minute
+        totalMinutes = endMinutes - startMinutes
+
+        if totalMinutes <= 0:
+            raise ValueError("La hora inicial del evento debe ser menor a la hora final.")
+
+        hours, minutes = divmod(totalMinutes, 60)
+        durationParts = []
+
+        if hours:
+            durationParts.append(f"{hours} {'HORA' if hours == 1 else 'HORAS'}")
+
+        if minutes:
+            durationParts.append(
+                f"{minutes} {'MINUTO' if minutes == 1 else 'MINUTOS'}"
+            )
+
+        return " ".join(durationParts)
+
+    def _normalizeEventFacilitators(
+        self,
+        *,
+        facilitatorName: str | None,
+        facilitatorType: str | None,
+        facilitatorCompany: str | None,
+        facilitatorPosition: str | None,
+        secondFacilitatorName: str | None,
+        secondFacilitatorType: str | None,
+        secondFacilitatorCompany: str | None,
+        secondFacilitatorPosition: str | None,
+    ) -> dict[str, str | None]:
+        principal = self._normalizeFacilitator(
+            name=facilitatorName,
+            facilitatorType=facilitatorType,
+            company=facilitatorCompany,
+            position=facilitatorPosition,
+            label="facilitador principal",
+            required=True,
+            positionRequired=True,
+        )
+        second = self._normalizeFacilitator(
+            name=secondFacilitatorName,
+            facilitatorType=secondFacilitatorType,
+            company=secondFacilitatorCompany,
+            position=secondFacilitatorPosition,
+            label="segundo facilitador",
+            required=False,
+            positionRequired=False,
+        )
+
+        return {
+            "facilitatorNameEvent": principal["name"],
+            "facilitatorCompanyEvent": principal["company"],
+            "facilitatorPositionEvent": principal["position"],
+            "secondFacilitatorNameEvent": second["name"],
+            "secondFacilitatorCompanyEvent": second["company"],
+            "secondFacilitatorPositionEvent": second["position"],
+        }
+
+    def _normalizeFacilitator(
+        self,
+        *,
+        name: str | None,
+        facilitatorType: str | None,
+        company: str | None,
+        position: str | None,
+        label: str,
+        required: bool,
+        positionRequired: bool,
+    ) -> dict[str, str | None]:
+        normalizedName = self._uppercaseOptionalText(name) or None
+        normalizedType = self._uppercaseOptionalText(facilitatorType) or None
+        normalizedCompany = self._uppercaseOptionalText(company) or None
+        normalizedPosition = self._uppercaseOptionalText(position) or None
+        hasAnyData = any(
+            (
+                normalizedName,
+                normalizedType,
+                normalizedCompany,
+                normalizedPosition,
+            )
+        )
+
+        if not required and not hasAnyData:
+            return {"name": None, "company": None, "position": None}
+
+        if not normalizedName:
+            raise ValueError(f"El nombre del {label} es obligatorio.")
+
+        if positionRequired and not normalizedPosition:
+            raise ValueError(f"El cargo del {label} es obligatorio.")
+
+        if not normalizedType:
+            raise ValueError(f"El tipo del {label} es obligatorio.")
+
+        if normalizedType not in self.FACILITATOR_TYPES:
+            raise ValueError(
+                f"El tipo del {label} debe ser INTERNO o EXTERNO."
+            )
+
+        if (
+            normalizedType == self.FACILITATOR_TYPE_EXTERNAL
+            and not normalizedCompany
+        ):
+            raise ValueError(
+                f"La empresa del {label} es obligatoria cuando es EXTERNO."
+            )
+
+        if normalizedType == self.FACILITATOR_TYPE_INTERNAL:
+            normalizedCompany = None
+
+        return {
+            "name": normalizedName,
+            "company": normalizedCompany,
+            "position": normalizedPosition,
+        }
+
+    def _inferFacilitatorType(
+        self,
+        facilitatorName: str | None,
+        facilitatorCompany: str | None,
+    ) -> str | None:
+        if facilitatorCompany and facilitatorCompany.strip():
+            return self.FACILITATOR_TYPE_EXTERNAL
+
+        if facilitatorName and facilitatorName.strip():
+            return self.FACILITATOR_TYPE_INTERNAL
+
+        return None
+
+    def _getFinalUpdateValue(
+        self,
+        eventData: EventUpdateDto,
+        fieldName: str,
+        currentValue,
+    ):
+        if fieldName in eventData.model_fields_set:
+            return getattr(eventData, fieldName)
+
+        return currentValue
     
     def _getEventStatusName(self, event: Event) -> str:
         if event.eventStatus and event.eventStatus.nameEventStatus:
@@ -350,7 +627,20 @@ class EventApplication(IEventApplication):
         return event.createdByUserLogin == userLogin
 
     def _buildResponse(self, event: Event) -> EventResponseDto:
-        return EventResponseDto.model_validate(event)
+        response = EventResponseDto.model_validate(event)
+
+        return response.model_copy(
+            update={
+                "facilitatorTypeEvent": self._inferFacilitatorType(
+                    event.facilitatorNameEvent,
+                    event.facilitatorCompanyEvent,
+                ),
+                "secondFacilitatorTypeEvent": self._inferFacilitatorType(
+                    event.secondFacilitatorNameEvent,
+                    event.secondFacilitatorCompanyEvent,
+                ),
+            }
+        )
     
     def uploadPensum(self, IdEvent: int, file: UploadFile, userLogin: str, roles: list[str]):
         eventFound = self.eventRepository.getById(IdEvent)
@@ -372,9 +662,21 @@ class EventApplication(IEventApplication):
         allowedExtensions = {
             ".pdf",
             ".doc",
+            ".docm",
             ".docx",
+            ".odt",
+            ".rtf",
+            ".txt",
+            ".csv",
+            ".ods",
             ".xls",
+            ".xlsb",
+            ".xlsm",
             ".xlsx",
+            ".odp",
+            ".ppt",
+            ".pptm",
+            ".pptx",
             ".png",
             ".jpg",
             ".jpeg",
@@ -384,7 +686,10 @@ class EventApplication(IEventApplication):
         extension = os.path.splitext(originalFileName)[1].lower()
 
         if extension not in allowedExtensions:
-            raise ValueError("Tipo de archivo no permitido. Adjunte PDF, Word, Excel o imagen.")
+            raise ValueError(
+                "Tipo de archivo no permitido. Adjunte PDF, imagen o un "
+                "documento compatible con OnlyOffice."
+            )
 
         pensumDirectory = os.path.join(self.uploadDir, "pensum", str(IdEvent))
         os.makedirs(pensumDirectory, exist_ok=True)

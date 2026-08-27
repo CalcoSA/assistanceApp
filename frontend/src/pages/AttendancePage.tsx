@@ -1,4 +1,4 @@
-import { Box, Button, CircularProgress, MenuItem, Paper, Stack, TextField, Typography, } from "@mui/material";
+import { Alert, Box, Button, CircularProgress, MenuItem, Paper, Stack, TextField, Typography, } from "@mui/material";
 import type { AttendanceRegisterRequest, PublicEvent, PersonnelType } from "../models/Attendance";
 import { solutionCenterService } from "../services/solutionCenterService";
 import type { ResponseModalSeverity } from "../components/ResponseModal";
@@ -6,6 +6,7 @@ import { publicAttendanceService } from "../services/attendanceService";
 import type { SolutionCenter } from "../models/SolutionCenter";
 import { ResponseModal } from "../components/ResponseModal";
 import { getErrorMessage } from "../services/errorService";
+import { getBackendFileUrl } from "../services/backendFileService";
 import SignatureCanvas from "react-signature-canvas";
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -74,29 +75,6 @@ export function AttendancePage() {
       ...prev,
       open: false,
     }));
-  };
-
-  const getBackendFileUrl = (path?: string | null) => {
-
-    if (!path) return "";
-
-    if (path.startsWith("http")) {
-      return path;
-    }
-
-    if (path.startsWith("/api/")) {
-      const backendBaseUrl =
-        (import.meta.env.VITE_API_URL)
-          .replace(/\/api\/?$/, "");
-
-      return `${backendBaseUrl}${path}`;
-    }
-
-    const apiBaseUrl = import.meta.env.VITE_API_URL;
-    const normalizedApiBaseUrl = apiBaseUrl.endsWith("/api")
-      ? apiBaseUrl
-      : `${apiBaseUrl.replace(/\/$/, "")}/api`;
-    return `${normalizedApiBaseUrl}${path}`;
   };
 
   const loadEvent = async () => {
@@ -331,7 +309,14 @@ export function AttendancePage() {
       setReplaceSignature(false);
       signatureRef.current?.clear();
     } catch (err) {
-      showResponseModal("error", "Error", getErrorMessage(err));
+      const errorMessage = getErrorMessage(err);
+
+      if (errorMessage.toLocaleLowerCase("es").includes("máximo de colaboradores")) {
+        await loadEvent();
+        return;
+      }
+
+      showResponseModal("error", "Error", errorMessage);
     } finally {
       setSaving(false);
     }
@@ -362,6 +347,34 @@ export function AttendancePage() {
     return (
       <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  const isCapacityReached = Boolean(
+    event &&
+      event.scheduledPeopleNumber !== null &&
+      event.scheduledPeopleNumber !== undefined &&
+      (event.attendedPeopleNumber ?? 0) >= event.scheduledPeopleNumber
+  );
+
+  if (event && isCapacityReached) {
+    return (
+      <Box sx={{ minHeight: "100vh", bgcolor: "#F8F3EC", display: "flex", alignItems: "center", justifyContent: "center", px: 2 }}>
+        <Paper elevation={0} sx={{ width: "100%", maxWidth: 560, borderRadius: 4, border: "1px solid #E0CDBB", bgcolor: "#FFFDF8", p: { xs: 3, md: 4 }, textAlign: "center" }}>
+          <Typography sx={{ color: "#4B2E1F", fontSize: 26, fontWeight: 800, mb: 1 }}>
+            Registro de asistencia
+          </Typography>
+          <Typography sx={{ color: "#7A6252", fontSize: 16, mb: 3 }}>
+            {event.titleEvent}
+          </Typography>
+          <Alert severity="warning" variant="outlined" sx={{ textAlign: "left", alignItems: "center" }}>
+            Se alcanzó el máximo de colaboradores registrados para este evento.
+          </Alert>
+          <Typography sx={{ color: "#7A6252", fontSize: 14, mt: 2 }}>
+            Cupos registrados: {event.attendedPeopleNumber ?? 0} de {event.scheduledPeopleNumber}.
+          </Typography>
+        </Paper>
       </Box>
     );
   }

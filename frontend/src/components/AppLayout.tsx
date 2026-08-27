@@ -1,15 +1,12 @@
 import { Avatar, Box, Button, Collapse, Divider, IconButton, Tooltip, Typography, Dialog, DialogActions, DialogContent, DialogTitle, Paper, Stack, } from "@mui/material";
 import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
 import DashboardCustomizeOutlinedIcon from "@mui/icons-material/DashboardCustomizeOutlined";
-import DeliveryDiningOutlinedIcon from "@mui/icons-material/DeliveryDiningOutlined";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import AssignmentOutlinedIcon from "@mui/icons-material/AssignmentOutlined";
 import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
 import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import BusinessOutlinedIcon from "@mui/icons-material/BusinessOutlined";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
 import EventOutlinedIcon from "@mui/icons-material/EventOutlined";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
@@ -44,16 +41,6 @@ const masterItems: MenuItem[] = [
     icon: <BusinessOutlinedIcon />,
   },
   {
-    label: "Domiciliarios",
-    path: "/maestros/domiciliarios",
-    icon: <DeliveryDiningOutlinedIcon />,
-  },
-  {
-    label: "Parámetros",
-    path: "/maestros/parametros",
-    icon: <TuneOutlinedIcon />,
-  },
-  {
     label: "Roles",
     path: "/maestros/roles",
     icon: <AdminPanelSettingsOutlinedIcon />,
@@ -64,9 +51,9 @@ const masterItems: MenuItem[] = [
     icon: <PeopleAltOutlinedIcon />,
   },
   {
-    label: "Correos PDV",
-    path: "/maestros/correos-pdv",
-    icon: <EmailOutlinedIcon />,
+    label: "Parámetros",
+    path: "/maestros/parametros",
+    icon: <TuneOutlinedIcon />,
   },
 ];
 
@@ -83,7 +70,7 @@ const mainItems: MenuItem[] = [
   },
 ];
 
-type HelpPath = "/registro-domicilios" | "/reporte-domicilios";
+type HelpPath = "/eventos" | "/reportes" | "/maestros/parametros";
 
 interface HelpStep {
   title: string;
@@ -98,106 +85,128 @@ interface HelpContent {
 }
 
 const getHelpPathFromCurrentRoute = (pathname: string): HelpPath => {
-  if (pathname === "/reporte-domicilios") {
-    return "/reporte-domicilios";
+  if (pathname.startsWith("/reportes")) {
+    return "/reportes";
   }
 
-  return "/registro-domicilios";
+  if (pathname.startsWith("/maestros/parametros")) {
+    return "/maestros/parametros";
+  }
+
+  return "/eventos";
 };
 
 const helpContentByPath: Record<HelpPath, HelpContent> = {
-  "/registro-domicilios": {
-    title: "Instructivo - Registro de domicilios",
+  "/eventos": {
+    title: "Instructivo - Gestión de eventos",
     description:
-      "Esta opción permite registrar los domicilios realizados por cada domiciliario, según la fecha y el punto de venta seleccionado. También permite registrar ausentismos cuando el domiciliario no realiza domicilios en la fecha seleccionada.",
+      "Esta opción permite crear y administrar capacitaciones, consultar sus asistentes y compartir el acceso al registro mediante un código QR.",
     steps: [
       {
-        title: "Selecciona la fecha",
+        title: "Crea el evento",
         description:
-          "Elige la fecha correspondiente al día que deseas registrar. Por defecto, el sistema puede cargar la fecha actual.",
+          "Presiona Crear evento y completa la información general, fecha, horario, centro de soluciones, motivo, programa, categoría y facilitadores.",
       },
       {
-        title: "Selecciona el punto de venta",
+        title: "Agrega temas y competencias",
         description:
-          "Escoge el punto de venta al que pertenecen los domiciliarios. Al seleccionarlo, el sistema cargará los domiciliarios activos asociados.",
+          "Registra al menos un tema tratado y selecciona las competencias relacionadas con la capacitación.",
       },
       {
-        title: "Registra los domicilios",
+        title: "Carga y revisa el PENSUM",
         description:
-          "Ingresa la cantidad de domicilios realizados por cada domiciliario. El campo solo permite valores numéricos.",
+          "Adjunta el documento requerido y utiliza la opción de previsualización para confirmar que elegiste el archivo correcto.",
       },
       {
-        title: "Selecciona un ausentismo si aplica",
+        title: "Valida la programación",
         description:
-          "Si un domiciliario no realizó domicilios ese día, selecciona el tipo de ausentismo correspondiente en la lista. Al seleccionar un ausentismo, la cantidad de domicilios queda en 0.",
+          "La hora de inicio debe ser posterior a la hora actual y menor que la hora final. El sistema permite programar eventos para el mismo día si aún no han comenzado.",
       },
       {
-        title: "Valida los registros",
+        title: "Guarda y notifica",
         description:
-          "Cada domiciliario debe tener una cantidad de domicilios mayor a 0 o un tipo de ausentismo seleccionado. No deben quedar filas pendientes antes de guardar.",
+          "Al presionar Crear evento, el sistema guarda la información y envía la notificación al correo del usuario creador y a los destinatarios adicionales configurados en Parámetros.",
       },
       {
-        title: "Guarda los registros",
+        title: "Consulta y comparte",
         description:
-          "Cuando todos los domiciliarios tengan una cantidad registrada o un ausentismo seleccionado, presiona el botón de guardar.",
+          "Desde las acciones del evento puedes ver el detalle, consultar asistentes, descargar el QR, actualizar la información o cancelar cuando corresponda.",
       },
     ],
     recommendations: [
-      "Verifica la fecha antes de guardar.",
-      "Verifica que el punto de venta seleccionado sea el correcto.",
-      "Todos los domiciliarios deben tener cantidad de domicilios o un ausentismo seleccionado.",
-      "Si seleccionas un ausentismo, el sistema registrará la cantidad de domicilios en 0.",
-      "Si seleccionaste mal el punto de venta, limpia el formulario y vuelve a iniciar.",
+      "Verifica la fecha, el horario y el número de personas programadas antes de crear.",
+      "Confirma que el PENSUM previsualizado corresponda al evento.",
+      "Si aparece una advertencia de correo, el evento sí quedó creado; revisa Parámetros o la configuración SMTP.",
+      "Comparte el QR únicamente con las personas que deben registrar su asistencia.",
     ],
   },
 
-  "/reporte-domicilios": {
-    title: "Instructivo - Reporte de domicilios",
+  "/reportes": {
+    title: "Instructivo - Reportes de capacitación",
     description:
-      "Esta opción permite consultar y exportar la información de domicilios registrados, usando filtros por fecha, periodo, punto de venta y domiciliario. El reporte también muestra los ausentismos registrados y sus cantidades.",
+      "Esta opción permite analizar la información registrada en los eventos y exportar los resultados de capacitación a Excel.",
     steps: [
       {
         title: "Selecciona el rango de fechas",
         description:
-          "Define la fecha inicial y la fecha final del reporte. La fecha final no debe ser menor que la fecha inicial.",
+          "Define la fecha inicial y final de la consulta. La fecha inicial no puede ser posterior a la fecha final.",
       },
       {
-        title: "Selecciona el periodo",
+        title: "Aplica los filtros",
         description:
-          "Elige cómo deseas consultar la información: por día, semana o mes.",
+          "Selecciona los criterios disponibles para enfocar el análisis en la información que necesitas.",
       },
       {
-        title: "Filtra por punto de venta",
+        title: "Consulta los resultados",
         description:
-          "Puedes consultar todos los puntos de venta o seleccionar uno específico para revisar información más detallada.",
+          "Ejecuta la consulta y revisa los indicadores, totales y detalles generados por el sistema.",
       },
       {
-        title: "Filtra por domiciliario si aplica",
+        title: "Exporta a Excel",
         description:
-          "Si seleccionas un punto de venta, también puedes consultar un domiciliario específico.",
-      },
-      {
-        title: "Consulta la información",
-        description:
-          "Presiona el botón de consultar para cargar el reporte según los filtros seleccionados.",
-      },
-      {
-        title: "Revisa domicilios y ausentismos",
-        description:
-          "El reporte muestra la cantidad de domicilios, el tipo de ausentismo registrado en el detalle y la cantidad total de ausentismos en los subtotales y totales.",
-      },
-      {
-        title: "Exporta el reporte",
-        description:
-          "Cuando el reporte tenga información, puedes descargarlo en Excel usando el botón de exportar.",
+          "Cuando existan resultados, presiona Exportar Excel para descargar el reporte con los filtros seleccionados.",
       },
     ],
     recommendations: [
       "Primero consulta el reporte antes de exportarlo.",
       "Si no aparecen datos, valida que existan registros para el rango de fechas seleccionado.",
       "Usa los filtros para encontrar información más específica.",
-      "En los subtotales y totales se muestra la cantidad de ausentismos, no el nombre de cada ausentismo.",
-      "El nombre del ausentismo se muestra en el detalle del reporte cuando aplica.",
+      "Revisa el rango de fechas que aparece en el archivo exportado.",
+    ],
+  },
+
+  "/maestros/parametros": {
+    title: "Instructivo - Parámetros del sistema",
+    description:
+      "Esta opción administra claves de configuración utilizadas por procesos internos. En la creación de eventos, permite definir destinatarios adicionales al correo del usuario creador.",
+    steps: [
+      {
+        title: "Ubica el parámetro de notificación",
+        description:
+          "Busca DESTINATARIOS_NOTIFICACION_EVENTO. Su nombre es una clave técnica fija y por eso no se puede renombrar ni eliminar.",
+      },
+      {
+        title: "Actualiza los destinatarios",
+        description:
+          "Presiona editar e ingresa uno o varios correos adicionales separados por coma, punto y coma o salto de línea. Si el correo del creador también está en la lista, el sistema elimina el duplicado.",
+      },
+      {
+        title: "Corrige los formatos inválidos",
+        description:
+          "El sistema valida cada dirección antes de guardar. Revisa cualquier correo señalado como inválido.",
+      },
+      {
+        title: "Guarda y verifica",
+        description:
+          "Guarda el valor y crea un evento de prueba. El mensaje final indicará si la notificación se envió o si falta configuración SMTP.",
+      },
+    ],
+    recommendations: [
+      "Mantén únicamente destinatarios autorizados para recibir información de capacitaciones.",
+      "No guardes contraseñas ni credenciales SMTP dentro de los parámetros.",
+      "Las credenciales del servidor de correo se administran exclusivamente en el entorno del backend.",
+      "Crear un parámetro nuevo solo almacena una clave y su valor; tendrá efecto cuando algún proceso de la aplicación use expresamente ese nombre.",
+      "Evita eliminar parámetros desconocidos sin confirmar qué proceso los utiliza.",
     ],
   },
 };
@@ -950,34 +959,33 @@ function Footer() {
         <DialogContent sx={{ p: 0 }}>
           <Box sx={{ p: 3 }}>
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
-              El Sistema de Registro de Domicilios es una aplicación de uso interno de
+              El Sistema de Registro de Asistencia es una aplicación de uso interno de
               la Compañía de Alimentos Colombianos Calco S.A. / Crepes & Waffles,
-              destinada a apoyar la gestión operativa relacionada con puntos de venta,
-              domiciliarios, registros de domicilios, ausentismos, liquidaciones,
-              reportes, usuarios, roles y parámetros del sistema.
+              destinada a gestionar capacitaciones, eventos, registro de asistentes y
+              generación de reportes relacionados con estos procesos.
             </Typography>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
-              La información registrada en esta aplicación será utilizada únicamente
-              para fines operativos, administrativos, de seguimiento, auditoría, control
-              interno y generación de reportes asociados al proceso de domicilios. No
-              debe ser usada para fines personales, externos o diferentes a los
-              autorizados por la Compañía.
+              Para cumplir esa finalidad, la aplicación puede tratar información de
+              usuarios autorizados, roles y permisos; datos de los eventos y sus
+              facilitadores; documentos PENSUM; y datos suministrados por los asistentes,
+              como nombre, identificación, cargo, teléfono, centro de soluciones y firma.
+              También puede registrar fecha, hora, dirección IP y datos técnicos básicos
+              del navegador para fines de trazabilidad y seguridad.
             </Typography>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
-              La aplicación puede tratar información como usuarios autenticados,
-              correos autorizados de punto de venta, roles, permisos, puntos de venta,
-              domiciliarios, documentos de identificación, fechas de registro,
-              cantidades de domicilios, ausentismos, valores de liquidación,
-              parámetros y trazabilidad de creación o actualización de registros.
+              La información se utiliza exclusivamente para programar capacitaciones,
+              acreditar y consultar asistencias, realizar seguimiento, generar reportes,
+              enviar notificaciones operativas y atender necesidades de auditoría y
+              control interno autorizadas por la Compañía.
             </Typography>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
-              El acceso a la información se realiza de acuerdo con los perfiles y
-              permisos asignados a cada usuario. Cada usuario es responsable del uso
-              adecuado de sus credenciales, del manejo responsable de la información
-              consultada y de no divulgar datos a personas no autorizadas.
+              El acceso está limitado por autenticación, roles y opciones de menú. Los
+              usuarios deben consultar, registrar, modificar, descargar o compartir datos
+              únicamente cuando su función lo requiera, y deben evitar su divulgación a
+              personas no autorizadas.
             </Typography>
 
             <Paper
@@ -992,23 +1000,22 @@ function Footer() {
               }}
             >
               <Typography sx={{ color: "#4B2E1F", fontSize: 16, fontWeight: 700, mb: 1 }}>
-                Fuente interna y marco normativo
+                Protección y actualización de la información
               </Typography>
 
               <Typography sx={{ color: "#6A4A38", fontSize: 14, lineHeight: 1.7 }}>
-                Esta política se fundamenta en el documento interno “Sistema de Gestión
-                de Seguridad de la Información - TEC-I-CWN-01”, versión 4.2, de la
-                Dirección de Tecnología de Crepes y Waffles S.A., y en la normativa
-                colombiana aplicable sobre protección de datos personales,
-                especialmente el artículo 15 de la Constitución Política de Colombia,
-                la Ley 1581 de 2012 y sus decretos reglamentarios.
+                La Compañía debe aplicar medidas razonables de seguridad y conservar la
+                información durante el tiempo definido para el proceso. Las solicitudes
+                de consulta, actualización, corrección o tratamiento de datos personales
+                deben tramitarse mediante los canales corporativos y la política de
+                protección de datos vigente.
               </Typography>
             </Paper>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7 }}>
-              El uso de esta aplicación implica la aceptación de estas condiciones y el
-              compromiso de tratar la información de manera responsable, segura y
-              exclusivamente para las finalidades autorizadas.
+              Este aviso resume el uso de información dentro de la aplicación y debe
+              interpretarse junto con las políticas corporativas de privacidad, seguridad
+              de la información y conservación documental que se encuentren vigentes.
             </Typography>
           </Box>
         </DialogContent>
@@ -1089,11 +1096,10 @@ function Footer() {
         <DialogContent sx={{ p: 0 }}>
           <Box sx={{ p: 3 }}>
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
-              El Sistema de Registro de Domicilios es un aplicativo de uso interno de la
-              Compañía de Alimentos Colombianos Calco S.A. / Crepes & Waffles, dispuesto
-              para apoyar la gestión operativa, administrativa y de seguimiento relacionada
-              con el registro de domicilios, puntos de venta, domiciliarios, ausentismos,
-              liquidaciones, reportes, usuarios, roles y parámetros del sistema.
+              El Sistema de Registro de Asistencia es una aplicación de uso interno de la
+              Compañía de Alimentos Colombianos Calco S.A. / Crepes & Waffles, dispuesta
+              para programar capacitaciones, administrar eventos, registrar asistentes y
+              consultar o exportar la información autorizada del proceso.
             </Typography>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
@@ -1112,27 +1118,24 @@ function Footer() {
             </Typography>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
-              Las credenciales de acceso, códigos de verificación, usuarios, contraseñas y
-              permisos asignados son personales, intransferibles y de uso exclusivo del
-              usuario autorizado. El usuario es responsable de proteger sus accesos y de no
-              compartirlos con terceros.
+              Las credenciales, enlaces de acceso, códigos QR y permisos asignados deben
+              protegerse y utilizarse únicamente para su finalidad. El usuario es
+              responsable de no compartir accesos administrativos ni facilitar el registro
+              de asistencia a personas ajenas al evento correspondiente.
             </Typography>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
-              La información consultada, registrada, modificada o exportada desde el
-              aplicativo debe manejarse con confidencialidad y únicamente para las
-              finalidades autorizadas. No está permitido divulgar, copiar, alterar, eliminar,
-              extraer o distribuir información del sistema sin autorización previa de la
-              Compañía.
+              La información consultada, registrada, modificada o exportada debe manejarse
+              con confidencialidad. El usuario debe verificar que los datos del evento, el
+              PENSUM, los destinatarios de correo y la información de los asistentes sean
+              correctos antes de guardarlos o compartirlos.
             </Typography>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
-              El software, código fuente, configuraciones, diseños, bases de datos,
-              reportes, documentación técnica y demás componentes relacionados con este
-              aplicativo son propiedad de la Compañía o se encuentran autorizados para su
-              uso, según corresponda. No está permitida su reproducción, modificación,
-              distribución, instalación o uso por fuera de los lineamientos definidos por la
-              Dirección de Tecnología.
+              No está permitido extraer, divulgar, modificar o eliminar información sin
+              autorización; cargar archivos ajenos al proceso; configurar destinatarios no
+              autorizados; ni utilizar los datos para fines personales, comerciales o
+              diferentes a las funciones laborales aprobadas.
             </Typography>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
@@ -1144,10 +1147,10 @@ function Footer() {
             </Typography>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7, mb: 2 }}>
-              La Compañía podrá realizar monitoreo, revisión, auditoría y seguimiento sobre
-              el uso del aplicativo, con el fin de garantizar la seguridad de la información,
-              el cumplimiento de políticas internas, la continuidad del servicio y la correcta
-              operación del proceso.
+              La actividad del sistema puede conservar trazabilidad para fines de soporte,
+              auditoría, seguridad y control interno. La disponibilidad de determinadas
+              funciones depende del rol, los permisos asignados y la configuración técnica
+              de servicios como el envío de correo.
             </Typography>
 
             <Paper
@@ -1162,31 +1165,23 @@ function Footer() {
               }}
             >
               <Typography sx={{ color: "#4B2E1F", fontSize: 16, fontWeight: 700, mb: 1 }}>
-                Fuente interna y marco normativo
+                Uso responsable
               </Typography>
 
               <Typography sx={{ color: "#6A4A38", fontSize: 14, lineHeight: 1.7 }}>
-                Estos términos se fundamentan en los lineamientos internos de seguridad de
-                la información de la Compañía, especialmente en las políticas relacionadas
-                con uso de aplicativos, uso de software, control de acceso, confidencialidad,
-                respaldo, bases de datos, intranet, propiedad intelectual y manejo
-                responsable de la información.
-              </Typography>
-
-              <Typography sx={{ color: "#6A4A38", fontSize: 14, lineHeight: 1.7, mt: 1.5 }}>
-                También se apoyan en la normativa colombiana aplicable, incluyendo la Ley
-                1581 de 2012 sobre protección de datos personales, la Ley 1273 de 2009
-                sobre protección de la información y los datos, la Ley 23 de 1982 y el
-                Decreto 1360 de 1989 sobre protección del software, y la Ley 527 de 1999
-                sobre mensajes de datos y medios electrónicos.
+                Ante un dato incorrecto, un acceso no autorizado, un correo enviado a un
+                destinatario equivocado o cualquier incidente de seguridad, el usuario debe
+                detener la operación cuando sea posible y reportarla por los canales
+                corporativos definidos para soporte y seguridad de la información.
               </Typography>
             </Paper>
 
             <Typography sx={{ color: "#4B2E1F", fontSize: 15, lineHeight: 1.7 }}>
               El uso de este aplicativo implica el conocimiento y aceptación de estos
-              términos y condiciones, así como el compromiso de utilizar la información, los
-              módulos y las funcionalidades del sistema de manera responsable, segura y
-              exclusivamente para las finalidades autorizadas por la Compañía.
+              términos y condiciones y el compromiso de utilizar sus módulos e información
+              de manera responsable, segura y exclusivamente para las finalidades
+              autorizadas por la Compañía. Estos términos se complementan con las políticas
+              corporativas vigentes.
             </Typography>
           </Box>
         </DialogContent>
@@ -1274,82 +1269,118 @@ function Footer() {
                 mb: 2,
               }}
             >
-              Actualmente el sistema cuenta con instructivos para las opciones
-              de Registro de domicilios y Reporte de domicilios.
+              Consulta el paso a paso de las funciones principales del Sistema
+              de Registro de Asistencia.
             </Typography>
 
             <Stack
               sx={{
                 display: "grid",
-                gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                gridTemplateColumns: {
+                  xs: "1fr",
+                  md: "repeat(3, minmax(0, 1fr))",
+                },
                 gap: 1.5,
                 mb: 3,
               }}
             >
               <Button
                 variant={
-                  selectedHelpPath === "/registro-domicilios"
+                  selectedHelpPath === "/eventos"
                     ? "contained"
                     : "outlined"
                 }
-                startIcon={<AssignmentOutlinedIcon />}
-                onClick={() => setSelectedHelpPath("/registro-domicilios")}
+                startIcon={<EventOutlinedIcon />}
+                onClick={() => setSelectedHelpPath("/eventos")}
                 sx={{
                   textTransform: "none",
                   justifyContent: "flex-start",
                   fontWeight: 600,
                   borderColor: "#8B6A55",
                   bgcolor:
-                    selectedHelpPath === "/registro-domicilios"
+                    selectedHelpPath === "/eventos"
                       ? "#4B2E1F"
                       : "transparent",
                   color:
-                    selectedHelpPath === "/registro-domicilios"
+                    selectedHelpPath === "/eventos"
                       ? "#FFFFFF"
                       : "#4B2E1F",
                   "&:hover": {
                     borderColor: "#4B2E1F",
                     bgcolor:
-                      selectedHelpPath === "/registro-domicilios"
+                      selectedHelpPath === "/eventos"
                         ? "#3A2318"
                         : "rgba(75, 46, 31, 0.05)",
                   },
                 }}
               >
-                Registro de domicilios
+                Eventos
               </Button>
 
               <Button
                 variant={
-                  selectedHelpPath === "/reporte-domicilios"
+                  selectedHelpPath === "/reportes"
                     ? "contained"
                     : "outlined"
                 }
                 startIcon={<AssessmentOutlinedIcon />}
-                onClick={() => setSelectedHelpPath("/reporte-domicilios")}
+                onClick={() => setSelectedHelpPath("/reportes")}
                 sx={{
                   textTransform: "none",
                   justifyContent: "flex-start",
                   fontWeight: 600,
                   borderColor: "#8B6A55",
                   bgcolor:
-                    selectedHelpPath === "/reporte-domicilios"
+                    selectedHelpPath === "/reportes"
                       ? "#4B2E1F"
                       : "transparent",
                   color:
-                    selectedHelpPath === "/reporte-domicilios"
+                    selectedHelpPath === "/reportes"
                       ? "#FFFFFF"
                       : "#4B2E1F",
                   "&:hover": {
                     borderColor: "#4B2E1F",
                     bgcolor:
-                      selectedHelpPath === "/reporte-domicilios"
+                      selectedHelpPath === "/reportes"
                         ? "#3A2318"
                         : "rgba(75, 46, 31, 0.05)",
                   },
                 }}
               >
-                Reporte de domicilios
+                Reportes
+              </Button>
+
+              <Button
+                variant={
+                  selectedHelpPath === "/maestros/parametros"
+                    ? "contained"
+                    : "outlined"
+                }
+                startIcon={<TuneOutlinedIcon />}
+                onClick={() => setSelectedHelpPath("/maestros/parametros")}
+                sx={{
+                  textTransform: "none",
+                  justifyContent: "flex-start",
+                  fontWeight: 600,
+                  borderColor: "#8B6A55",
+                  bgcolor:
+                    selectedHelpPath === "/maestros/parametros"
+                      ? "#4B2E1F"
+                      : "transparent",
+                  color:
+                    selectedHelpPath === "/maestros/parametros"
+                      ? "#FFFFFF"
+                      : "#4B2E1F",
+                  "&:hover": {
+                    borderColor: "#4B2E1F",
+                    bgcolor:
+                      selectedHelpPath === "/maestros/parametros"
+                        ? "#3A2318"
+                        : "rgba(75, 46, 31, 0.05)",
+                  },
+                }}
+              >
+                Parámetros
               </Button>
             </Stack>
 

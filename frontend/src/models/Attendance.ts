@@ -7,6 +7,8 @@ export interface PublicEvent {
   endTimeEvent: string;
   eventPlace?: string | null;
   facilitatorNameEvent?: string | null;
+  scheduledPeopleNumber?: number | null;
+  attendedPeopleNumber?: number | null;
   attendanceStartDateTime: string;
   attendanceEndDateTime: string;
 }
