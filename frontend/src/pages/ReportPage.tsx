@@ -1,4 +1,4 @@
-import { Box, Button, Card, CardContent, CircularProgress, Paper, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography, } from "@mui/material";
+import { Box, Button, Card, CardContent, CircularProgress, Collapse, IconButton, Paper, Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography, } from "@mui/material";
 import { ResponseModal, type ResponseModalSeverity, } from "../components/ResponseModal";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import EngineeringOutlinedIcon from "@mui/icons-material/EngineeringOutlined";
@@ -7,9 +7,12 @@ import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
 import PersonOffOutlinedIcon from "@mui/icons-material/PersonOffOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
 import { getErrorMessage } from "../services/errorService";
 import { reportService } from "../services/reportService";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 import type {
   TrainingReportResponse,
@@ -17,6 +20,8 @@ import type {
   TrainingHoursReportResponse,
   NewStaffInductionReportResponse,
   AdministrativeInductionReportResponse,
+  TransversalTrainingReportResponse,
+  CollaboratorTrainingReportResponse,
   GeneralReportResponse,
   AverageTrainingTimeReportResponse
 } from "../models/Report";
@@ -35,6 +40,7 @@ interface DonutChartItem {
 
 interface DonutChartProps {
   data: DonutChartItem[];
+  centerLabel?: string;
 }
 
 const emptyResponseModal: ResponseModalState = {
@@ -57,13 +63,11 @@ const donutColors = [
   "#D7CCC8",
 ];
 
-function DonutChart({ data }: DonutChartProps) {
+function DonutChart({ data, centerLabel = "capacitados" }: DonutChartProps) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
   const radius = 80;
   const strokeWidth = 34;
   const circumference = 2 * Math.PI * radius;
-
-  let accumulated = 0;
 
   if (total === 0) {
     return (
@@ -91,9 +95,13 @@ function DonutChart({ data }: DonutChartProps) {
             const percentage = item.value / total;
             const dash = percentage * circumference;
             const gap = circumference - dash;
-            const offset = -accumulated;
-
-            accumulated += dash;
+            const offset = -data
+              .slice(0, index)
+              .reduce(
+                (sum, previousItem) =>
+                  sum + (previousItem.value / total) * circumference,
+                0
+              );
 
             return (
               <circle
@@ -118,7 +126,7 @@ function DonutChart({ data }: DonutChartProps) {
             {total}
           </Typography>
           <Typography sx={{ color: "#7A6252", fontSize: 13 }}>
-            capacitados
+            {centerLabel}
           </Typography>
         </Box>
       </Box>
@@ -156,6 +164,16 @@ interface SimpleBarChartProps {
 }
 
 function SimpleBarChart({ data }: SimpleBarChartProps) {
+  if (data.length === 0) {
+    return (
+      <Box sx={{ py: 5, display: "flex", justifyContent: "center" }}>
+        <Typography sx={{ color: "#7A6252" }}>
+          No hay datos para graficar.
+        </Typography>
+      </Box>
+    );
+  }
+
   const maxValue = Math.max(...data.map((item) => item.value), 1);
 
   return (
@@ -221,8 +239,12 @@ const getCurrentMonthRange = () => {
   };
 };
 
+const formatReportDate = (value: string) =>
+  new Date(`${value}T00:00:00`).toLocaleDateString("es-CO");
+
 export function ReportPage() {
   const [administrativeInductionReport, setAdministrativeInductionReport] = useState<AdministrativeInductionReportResponse | null>(null);
+  const [transversalTrainingReport, setTransversalTrainingReport] = useState<TransversalTrainingReportResponse | null>(null);
   const [averageTrainingTimeReport, setAverageTrainingTimeReport] = useState<AverageTrainingTimeReportResponse | null>(null);
   const [newStaffInductionReport, setNewStaffInductionReport] = useState<NewStaffInductionReportResponse | null>(null);
   const [trainingHoursReport, setTrainingHoursReport] = useState<TrainingHoursReportResponse | null>(null);
@@ -231,11 +253,18 @@ export function ReportPage() {
   const [loadingAverageTrainingTime, setLoadingAverageTrainingTime] = useState(false);
   const [sstReport, setSstReport] = useState<SstTrainingReportResponse | null>(null);
   const [report, setReport] = useState<TrainingReportResponse | null>(null);
+  const [expandedSolutionCenter, setExpandedSolutionCenter] = useState<string | null>(null);
+  const [collaboratorReport, setCollaboratorReport] = useState<CollaboratorTrainingReportResponse | null>(null);
+  const [selectedCollaboratorDocument, setSelectedCollaboratorDocument] = useState<string | null>(null);
+  const [collaboratorSearch, setCollaboratorSearch] = useState("");
   const [totalWorkers, setTotalWorkers] = useState("");
   const currentMonthRange = getCurrentMonthRange();
   const [dateFrom, setDateFrom] = useState(currentMonthRange.dateFrom);
   const [dateTo, setDateTo] = useState(currentMonthRange.dateTo);
+  const [collaboratorDateFrom, setCollaboratorDateFrom] = useState(currentMonthRange.dateFrom);
+  const [collaboratorDateTo, setCollaboratorDateTo] = useState(currentMonthRange.dateTo);
   const [loading, setLoading] = useState(false);
+  const [loadingCollaborator, setLoadingCollaborator] = useState(false);
   
   const showResponseModal = (severity: ResponseModalSeverity, title: string, message: string) => {
     setResponseModal({
@@ -262,7 +291,7 @@ export function ReportPage() {
 
       setLoading(true);
 
-      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, generalResponse] = await Promise.all([
+      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, transversalTrainingResponse, generalResponse] = await Promise.all([
         reportService.getTrainingReport({
           dateFrom,
           dateTo,
@@ -280,6 +309,10 @@ export function ReportPage() {
           dateTo,
         }),
         reportService.getAdministrativeInductionReport({
+          dateFrom,
+          dateTo,
+        }),
+        reportService.getTransversalTrainingReport({
           dateFrom,
           dateTo,
         }),
@@ -314,6 +347,11 @@ export function ReportPage() {
         return;
       }
 
+      if (!transversalTrainingResponse.isSuccess || !transversalTrainingResponse.result) {
+        showResponseModal("error", "Error", transversalTrainingResponse.Message || "No se pudo cargar el reporte de capacitaciones transversales.");
+        return;
+      }
+
       if (!generalResponse.isSuccess || !generalResponse.result) {
         showResponseModal("error", "Error", generalResponse.Message || "No se pudo cargar el reporte general.");
         return;
@@ -324,6 +362,7 @@ export function ReportPage() {
       setTrainingHoursReport(trainingHoursResponse.result);
       setNewStaffInductionReport(newStaffInductionResponse.result);
       setAdministrativeInductionReport(administrativeInductionResponse.result);
+      setTransversalTrainingReport(transversalTrainingResponse.result);
       setGeneralReport(generalResponse.result);
     } catch (err) {
       showResponseModal("error", "Error", getErrorMessage(err));
@@ -341,7 +380,7 @@ export function ReportPage() {
     try {
       setLoading(true);
 
-      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, generalResponse] = await Promise.all([
+      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, transversalTrainingResponse, generalResponse] = await Promise.all([
         reportService.getTrainingReport({
           dateFrom: currentMonthRange.dateFrom,
           dateTo: currentMonthRange.dateTo,
@@ -362,9 +401,13 @@ export function ReportPage() {
           dateFrom: currentMonthRange.dateFrom,
           dateTo: currentMonthRange.dateTo,
         }),
+        reportService.getTransversalTrainingReport({
+          dateFrom: currentMonthRange.dateFrom,
+          dateTo: currentMonthRange.dateTo,
+        }),
         reportService.getGeneralReport({
-          dateFrom,
-          dateTo
+          dateFrom: currentMonthRange.dateFrom,
+          dateTo: currentMonthRange.dateTo,
         }),
       ]);
 
@@ -373,6 +416,7 @@ export function ReportPage() {
       setTrainingHoursReport(trainingHoursResponse.isSuccess ? trainingHoursResponse.result ?? null : null);
       setNewStaffInductionReport(newStaffInductionResponse.isSuccess ? newStaffInductionResponse.result ?? null : null);
       setAdministrativeInductionReport(administrativeInductionResponse.isSuccess ? administrativeInductionResponse.result ?? null : null);
+      setTransversalTrainingReport(transversalTrainingResponse.isSuccess ? transversalTrainingResponse.result ?? null : null);
       setGeneralReport(generalResponse.isSuccess ? generalResponse.result ?? null : null);
     } catch (err) {
       showResponseModal("error", "Error", getErrorMessage(err));
@@ -412,6 +456,59 @@ export function ReportPage() {
     }
   };
 
+  const loadCollaboratorTrainingReport = async () => {
+    const normalizedSearch = collaboratorSearch.trim();
+
+    if (!normalizedSearch) {
+      showResponseModal(
+        "warning",
+        "Campo obligatorio",
+        "Ingresa el nombre o la cédula del colaborador."
+      );
+      return;
+    }
+
+    if (
+      collaboratorDateFrom &&
+      collaboratorDateTo &&
+      collaboratorDateFrom > collaboratorDateTo
+    ) {
+      showResponseModal(
+        "warning",
+        "Fechas inválidas",
+        "La fecha inicial no puede ser mayor a la fecha final."
+      );
+      return;
+    }
+
+    try {
+      setLoadingCollaborator(true);
+      const response = await reportService.getCollaboratorTrainingReport({
+        search: normalizedSearch,
+        dateFrom: collaboratorDateFrom,
+        dateTo: collaboratorDateTo,
+      });
+
+      if (!response.isSuccess || !response.result) {
+        showResponseModal(
+          "error",
+          "Error",
+          response.Message || "No se pudo consultar el historial del colaborador."
+        );
+        return;
+      }
+
+      setCollaboratorReport(response.result);
+      setSelectedCollaboratorDocument(
+        response.result.collaborators[0]?.documentNumberAttendancePerson ?? null
+      );
+    } catch (err) {
+      showResponseModal("error", "Error", getErrorMessage(err));
+    } finally {
+      setLoadingCollaborator(false);
+    }
+  };
+
   const exportReportsToExcel = () => {
     const hasData =
       report ||
@@ -419,8 +516,10 @@ export function ReportPage() {
       trainingHoursReport ||
       newStaffInductionReport ||
       administrativeInductionReport ||
+      transversalTrainingReport ||
       generalReport ||
-      averageTrainingTimeReport;
+      averageTrainingTimeReport ||
+      collaboratorReport;
 
     if (!hasData) {
       showResponseModal(
@@ -435,7 +534,16 @@ export function ReportPage() {
 
     const rows: unknown[][] = [];
     const sectionRows: number[] = [];
+    const sectionEndColumns = new Map<number, number>();
     const headerRows: number[] = [];
+    const headerEndColumns = new Map<number, number>();
+    const historyTitleRows: number[] = [];
+    const historySubsectionRows: number[] = [];
+    const collaboratorDataRows: number[] = [];
+    const trainingDetailRows: number[] = [];
+    const trainingDetailRowHeights = new Map<number, number>();
+    const trainingSummaryRows: number[] = [];
+    const collaboratorTotalRows: number[] = [];
 
     const addRow = (row: unknown[]) => {
       rows.push(row);
@@ -444,16 +552,24 @@ export function ReportPage() {
 
     const addBlankRow = () => addRow([]);
 
-    const addSection = (title: string) => {
+    const addSection = (title: string, endColumn = 5) => {
       addBlankRow();
       const index = addRow([title]);
       sectionRows.push(index);
+      sectionEndColumns.set(index, endColumn);
       return index;
     };
 
-    const addHeader = (row: unknown[]) => {
+    const addHeader = (row: unknown[], endColumn = 5) => {
       const index = addRow(row);
       headerRows.push(index);
+      headerEndColumns.set(index, endColumn);
+      return index;
+    };
+
+    const addHistorySubsection = (title: string) => {
+      const index = addRow([title]);
+      historySubsectionRows.push(index);
       return index;
     };
 
@@ -494,6 +610,51 @@ export function ReportPage() {
       report?.bySolutionCenter.forEach((item) => {
         addRow([
           item.nameSolutionCenter,
+          formatNumber(item.totalTrainedPeople),
+        ]);
+      });
+    }
+
+    addBlankRow();
+    addHeader([
+      "Centro de soluciones",
+      "Capacitación",
+      "Fecha",
+      "Cédula",
+      "Colaborador",
+      "Horas",
+    ]);
+    const solutionCenterDetails = (report?.bySolutionCenter ?? []).flatMap(
+      (solutionCenter) =>
+        solutionCenter.details.map((detail) => ({
+          ...detail,
+          nameSolutionCenter: solutionCenter.nameSolutionCenter,
+        }))
+    );
+    if (solutionCenterDetails.length === 0) {
+      addRow(["No hay datos", "", "", "", "", 0]);
+    } else {
+      solutionCenterDetails.forEach((item) => {
+        addRow([
+          item.nameSolutionCenter,
+          item.titleEvent,
+          item.dateEvent,
+          item.documentNumberAttendancePerson,
+          item.fullNameAttendancePerson,
+          formatNumber(item.trainingHours),
+        ]);
+      });
+    }
+
+    addSection("COMPETENCIAS FORMADAS");
+    addHeader(["Competencia", "Eventos", "Asistencias"]);
+    if ((report?.byCompetency ?? []).length === 0) {
+      addRow(["No hay datos", 0, 0]);
+    } else {
+      report?.byCompetency.forEach((item) => {
+        addRow([
+          item.nameCompetency,
+          formatNumber(item.totalEvents),
           formatNumber(item.totalTrainedPeople),
         ]);
       });
@@ -591,6 +752,31 @@ export function ReportPage() {
       formatNumber(administrativeInductionReport?.totalAdministrativeInductionPeople),
     ]);
 
+    addSection("CAPACITACIONES TRANSVERSALES");
+    addHeader(["Indicador", "Valor"]);
+    addRow([
+      "Horas totales de capacitación transversal",
+      formatNumber(transversalTrainingReport?.totalTransversalTrainingHours),
+    ]);
+    addRow([
+      "Personal capacitado en transversales",
+      formatNumber(transversalTrainingReport?.totalTransversalTrainingPeople),
+    ]);
+    addBlankRow();
+    addHeader(["Cédula", "Colaborador", "Centro de soluciones", "Horas"]);
+    if ((transversalTrainingReport?.byCollaborator ?? []).length === 0) {
+      addRow(["No hay datos", "", "", 0]);
+    } else {
+      transversalTrainingReport?.byCollaborator.forEach((item) => {
+        addRow([
+          item.documentNumberAttendancePerson,
+          item.fullNameAttendancePerson,
+          item.nameSolutionCenter,
+          formatNumber(item.totalTransversalTrainingHours),
+        ]);
+      });
+    }
+
     addSection("GENERAL");
     addHeader(["Indicador", "Valor"]);
     addRow([
@@ -631,6 +817,84 @@ export function ReportPage() {
       ]);
     }
 
+    if (collaboratorReport) {
+      historyTitleRows.push(
+        addSection("HISTORIAL DE CAPACITACIÓN POR COLABORADOR", 3)
+      );
+      if (collaboratorReport.collaborators.length === 0) {
+        addRow(["No hay datos"]);
+      } else {
+        collaboratorReport.collaborators.forEach((collaborator, index) => {
+          addHistorySubsection("DATOS DEL COLABORADOR");
+          addHeader(["Cédula", "Colaborador"], 1);
+          collaboratorDataRows.push(addRow([
+            collaborator.documentNumberAttendancePerson,
+            collaborator.fullNameAttendancePerson,
+          ]));
+
+          addBlankRow();
+          addHistorySubsection("DETALLE DE CAPACITACIONES");
+          addHeader(
+            ["Capacitación", "Centro formador", "Fecha", "Horas"],
+            3
+          );
+
+          if (collaborator.trainings.length === 0) {
+            addRow(["No hay datos"]);
+          } else {
+            collaborator.trainings.forEach((training) => {
+              const trainingRow = addRow([
+                training.titleEvent,
+                training.nameSolutionCenter,
+                training.dateEvent,
+                training.trainingHours,
+              ]);
+              const estimatedLines = Math.max(
+                1,
+                Math.ceil(training.titleEvent.length / 45),
+                Math.ceil(training.nameSolutionCenter.length / 25)
+              );
+
+              trainingDetailRows.push(trainingRow);
+              trainingDetailRowHeights.set(
+                trainingRow,
+                Math.min(60, Math.max(20, estimatedLines * 15))
+              );
+            });
+          }
+
+          addBlankRow();
+          addHistorySubsection("RESUMEN POR CENTRO FORMADOR");
+          addHeader(
+            ["Centro formador", "Total capacitaciones", "Total horas"],
+            2
+          );
+
+          if (collaborator.byTrainingSolutionCenter.length === 0) {
+            addRow(["No hay datos"]);
+          } else {
+            collaborator.byTrainingSolutionCenter.forEach((solutionCenter) => {
+              trainingSummaryRows.push(addRow([
+                solutionCenter.nameSolutionCenter,
+                solutionCenter.totalTrainings,
+                solutionCenter.totalTrainingHours,
+              ]));
+            });
+          }
+
+          collaboratorTotalRows.push(addRow([
+            "TOTAL GENERAL",
+            collaborator.totalTrainings,
+            collaborator.totalTrainingHours,
+          ]));
+
+          if (index < collaboratorReport.collaborators.length - 1) {
+            addBlankRow();
+          }
+        });
+      }
+    }
+
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
 
     worksheet["!cols"] = [
@@ -647,6 +911,14 @@ export function ReportPage() {
         s: { r: titleRow, c: 0 },
         e: { r: titleRow, c: 5 },
       },
+      ...historyTitleRows.map((row) => ({
+        s: { r: row, c: 0 },
+        e: { r: row, c: 3 },
+      })),
+      ...historySubsectionRows.map((row) => ({
+        s: { r: row, c: 0 },
+        e: { r: row, c: 3 },
+      })),
     ];
 
     const borderThin = {
@@ -702,6 +974,48 @@ export function ReportPage() {
       border: borderThin,
     };
 
+    const historySubsectionStyle = {
+      font: { bold: true, color: { rgb: "4B2E1F" } },
+      fill: { fgColor: { rgb: "F7E8D8" } },
+      alignment: { horizontal: "left", vertical: "center" },
+      border: borderThin,
+    };
+
+    const collaboratorDataStyle = {
+      font: { bold: true, color: { rgb: "2F241D" } },
+      fill: { fgColor: { rgb: "FFFDF8" } },
+      alignment: { vertical: "center", wrapText: true },
+      border: borderThin,
+    };
+
+    const dateCellStyle = {
+      ...cellStyle,
+      alignment: {
+        horizontal: "center",
+        vertical: "center",
+        wrapText: true,
+      },
+    };
+
+    const integerCellStyle = {
+      ...cellStyle,
+      alignment: { horizontal: "right", vertical: "center" },
+      numFmt: "0",
+    };
+
+    const hoursCellStyle = {
+      ...cellStyle,
+      alignment: { horizontal: "right", vertical: "center" },
+      numFmt: "0.00",
+    };
+
+    const collaboratorTotalStyle = {
+      font: { bold: true, color: { rgb: "4B2E1F" } },
+      fill: { fgColor: { rgb: "F7E8D8" } },
+      alignment: { vertical: "center", wrapText: true },
+      border: borderThin,
+    };
+
     const setStyle = (row: number, col: number, style: object) => {
       const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
 
@@ -709,7 +1023,10 @@ export function ReportPage() {
         worksheet[cellAddress] = { t: "s", v: "" };
       }
 
-      (worksheet[cellAddress] as any).s = style;
+      const styledCell = worksheet[cellAddress] as XLSX.CellObject & {
+        s?: object;
+      };
+      styledCell.s = style;
     };
 
     const styleFullRow = (row: number, style: object, fromCol = 0, toCol = 5) => {
@@ -729,11 +1046,45 @@ export function ReportPage() {
     setStyle(filterRow, 5, filterValueStyle);
 
     sectionRows.forEach((row) => {
-      styleFullRow(row, sectionStyle);
+      styleFullRow(row, sectionStyle, 0, sectionEndColumns.get(row) ?? 5);
     });
 
     headerRows.forEach((row) => {
-      styleFullRow(row, headerStyle);
+      styleFullRow(row, headerStyle, 0, headerEndColumns.get(row) ?? 5);
+    });
+
+    historySubsectionRows.forEach((row) => {
+      styleFullRow(row, historySubsectionStyle, 0, 3);
+    });
+
+    collaboratorDataRows.forEach((row) => {
+      styleFullRow(row, collaboratorDataStyle, 0, 1);
+    });
+
+    trainingDetailRows.forEach((row) => {
+      styleFullRow(row, cellStyle, 0, 3);
+      setStyle(row, 2, dateCellStyle);
+      setStyle(row, 3, hoursCellStyle);
+    });
+
+    trainingSummaryRows.forEach((row) => {
+      styleFullRow(row, cellStyle, 0, 2);
+      setStyle(row, 1, integerCellStyle);
+      setStyle(row, 2, hoursCellStyle);
+    });
+
+    collaboratorTotalRows.forEach((row) => {
+      styleFullRow(row, collaboratorTotalStyle, 0, 2);
+      setStyle(row, 1, {
+        ...collaboratorTotalStyle,
+        alignment: { horizontal: "right", vertical: "center" },
+        numFmt: "0",
+      });
+      setStyle(row, 2, {
+        ...collaboratorTotalStyle,
+        alignment: { horizontal: "right", vertical: "center" },
+        numFmt: "0.00",
+      });
     });
 
     const range = XLSX.utils.decode_range(worksheet["!ref"] ?? "A1:A1");
@@ -743,27 +1094,39 @@ export function ReportPage() {
         const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
 
         if (!worksheet[cellAddress]) continue;
-        if ((worksheet[cellAddress] as any).s) continue;
+        const styledCell = worksheet[cellAddress] as XLSX.CellObject & {
+          s?: object;
+        };
+
+        if (styledCell.s) continue;
 
         const value = worksheet[cellAddress]?.v;
         const text = String(value ?? "").toLowerCase();
 
-        (worksheet[cellAddress] as any).s = text.includes("no hay datos")
+        styledCell.s = text.includes("no hay datos")
           ? mutedStyle
           : cellStyle;
       }
     }
 
-    worksheet["!rows"] = rows.map((_, index) => ({
-      hpt:
-        index === titleRow
-          ? 32
-          : sectionRows.includes(index)
-          ? 24
-          : headerRows.includes(index)
-          ? 22
-          : 20,
-    }));
+    worksheet["!rows"] = rows.map((_, index) => {
+      let height = 20;
+
+      if (index === titleRow) {
+        height = 32;
+      } else if (sectionRows.includes(index)) {
+        height = 24;
+      } else if (
+        historySubsectionRows.includes(index) ||
+        headerRows.includes(index)
+      ) {
+        height = 22;
+      } else if (trainingDetailRowHeights.has(index)) {
+        height = trainingDetailRowHeights.get(index) ?? 20;
+      }
+
+      return { hpt: height };
+    });
 
     worksheet["!autofilter"] = {
       ref: XLSX.utils.encode_range({
@@ -781,7 +1144,14 @@ export function ReportPage() {
   };
 
   useEffect(() => {
-    loadReport();
+    const timeoutId = window.setTimeout(() => {
+      void loadReport();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+    // La carga inicial debe ejecutarse una sola vez; los cambios de filtros se
+    // aplican explícitamente con el botón Consultar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const donutData =
@@ -791,6 +1161,26 @@ export function ReportPage() {
         name: item.nameSolutionCenter,
         value: item.totalTrainedPeople,
       })) ?? [];
+
+  const competencyChartData =
+    report?.byCompetency
+      ?.filter((item) => item.totalTrainedPeople > 0)
+      .map((item) => ({
+        name: item.nameCompetency,
+        value: item.totalTrainedPeople,
+      })) ?? [];
+
+  const selectedCollaborator =
+    collaboratorReport?.collaborators.find(
+      (item) =>
+        item.documentNumberAttendancePerson === selectedCollaboratorDocument
+    ) ?? null;
+
+  const collaboratorDonutData =
+    selectedCollaborator?.byTrainingSolutionCenter.map((item) => ({
+      name: item.nameSolutionCenter,
+      value: item.totalTrainings,
+    })) ?? [];
 
   const sstAverageHoursByCollaborator =
     sstReport?.summary.totalInternalSstTrainedPeople
@@ -918,8 +1308,8 @@ export function ReportPage() {
       ) : (
         <>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr 1fr", }, gap: 2, }}>
-            <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8", }}>
-              <CardContent>
+            <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8", minWidth: 0, }}>
+              <CardContent sx={{ minWidth: 0 }}>
                 <Box sx={{ display: "flex", flexDirection: "row", gap: 2, alignItems: "center", }}>
                   <Box sx={{ width: 50, height: 50, borderRadius: "50%", bgcolor: "#F7E8D8", color: "#4B2E1F", display: "flex", alignItems: "center", justifyContent: "center", }}>
                     <GroupsOutlinedIcon />
@@ -977,13 +1367,25 @@ export function ReportPage() {
               </Typography>
               <DonutChart data={donutData} />
             </Paper>
-            <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, overflow: "hidden", bgcolor: "#FFFDF8", }}>
-              <Box sx={{ p: 2 }}>
+            <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, overflow: "hidden", bgcolor: "#FFFDF8", minHeight: 420, maxHeight: { xs: 620, lg: 520 }, display: "flex", flexDirection: "column", alignSelf: "start", width: "100%", }}>
+              <Box sx={{ p: 2, flexShrink: 0 }}>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 18, fontWeight: 700, }}>
                   Detalle por centro de soluciones
                 </Typography>
               </Box>
-              <Table size="small">
+              <Box
+                sx={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: "auto",
+                  scrollbarColor: "#8B6A55 #F7E8D8",
+                  scrollbarWidth: "thin",
+                  "&::-webkit-scrollbar": { width: 10, height: 10 },
+                  "&::-webkit-scrollbar-track": { bgcolor: "#F7E8D8" },
+                  "&::-webkit-scrollbar-thumb": { bgcolor: "#8B6A55", borderRadius: 10 },
+                }}
+              >
+              <Table size="small" stickyHeader sx={{ minWidth: 620 }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: "#F7E8D8" }}>
                     <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>
@@ -992,29 +1394,109 @@ export function ReportPage() {
                     <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>
                       Capacitados
                     </TableCell>
+                    <TableCell align="center" sx={{ color: "#4B2E1F", fontWeight: 700, width: 64 }}>
+                      Detalle
+                    </TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {(report?.bySolutionCenter ?? []).length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={2} align="center" sx={{ color: "#7A6252", py: 3 }}>
+                      <TableCell colSpan={3} align="center" sx={{ color: "#7A6252", py: 3 }}>
                         No hay registros para mostrar.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    report?.bySolutionCenter.map((item) => (
-                      <TableRow key={item.nameSolutionCenter} hover>
-                        <TableCell>{item.nameSolutionCenter}</TableCell>
-                        <TableCell align="right">
-                          {item.totalTrainedPeople}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    report?.bySolutionCenter.map((item) => {
+                      const isExpanded =
+                        expandedSolutionCenter === item.nameSolutionCenter;
+
+                      return (
+                        <Fragment key={item.nameSolutionCenter}>
+                          <TableRow hover>
+                            <TableCell>{item.nameSolutionCenter}</TableCell>
+                            <TableCell align="right">
+                              {item.totalTrainedPeople}
+                            </TableCell>
+                            <TableCell align="center">
+                              <Tooltip title={isExpanded ? "Ocultar detalle" : "Ver detalle"}>
+                                <IconButton
+                                  size="small"
+                                  onClick={() =>
+                                    setExpandedSolutionCenter(
+                                      isExpanded ? null : item.nameSolutionCenter
+                                    )
+                                  }
+                                  aria-label={`${isExpanded ? "Ocultar" : "Ver"} detalle de ${item.nameSolutionCenter}`}
+                                >
+                                  {isExpanded ? (
+                                    <KeyboardArrowUpIcon />
+                                  ) : (
+                                    <KeyboardArrowDownIcon />
+                                  )}
+                                </IconButton>
+                              </Tooltip>
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell colSpan={3} sx={{ p: 0, borderBottom: isExpanded ? undefined : 0 }}>
+                              <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                                <Box sx={{ p: 2, bgcolor: "#FFFAF4", overflowX: "auto" }}>
+                                  <Typography sx={{ color: "#4B2E1F", fontWeight: 700, mb: 1.5 }}>
+                                    Asistencias registradas ({item.details.length})
+                                  </Typography>
+                                  <Table size="small" sx={{ minWidth: 720 }}>
+                                    <TableHead>
+                                      <TableRow>
+                                        <TableCell sx={{ fontWeight: 700 }}>Capacitación</TableCell>
+                                        <TableCell sx={{ fontWeight: 700 }}>Fecha</TableCell>
+                                        <TableCell sx={{ fontWeight: 700 }}>Cédula</TableCell>
+                                        <TableCell sx={{ fontWeight: 700 }}>Colaborador</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700 }}>Horas</TableCell>
+                                      </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                      {item.details.length === 0 ? (
+                                        <TableRow>
+                                          <TableCell colSpan={5} align="center" sx={{ color: "#7A6252" }}>
+                                            No hay asistencias para mostrar.
+                                          </TableCell>
+                                        </TableRow>
+                                      ) : (
+                                        item.details.map((detail) => (
+                                          <TableRow key={`${detail.IdEvent}-${detail.documentNumberAttendancePerson}`}>
+                                            <TableCell>{detail.titleEvent}</TableCell>
+                                            <TableCell>{formatReportDate(detail.dateEvent)}</TableCell>
+                                            <TableCell>{detail.documentNumberAttendancePerson}</TableCell>
+                                            <TableCell>{detail.fullNameAttendancePerson}</TableCell>
+                                            <TableCell align="right">{detail.trainingHours}</TableCell>
+                                          </TableRow>
+                                        ))
+                                      )}
+                                    </TableBody>
+                                  </Table>
+                                </Box>
+                              </Collapse>
+                            </TableCell>
+                          </TableRow>
+                        </Fragment>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
+              </Box>
             </Paper>
           </Box>
+          <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, p: 2, bgcolor: "#FFFDF8" }}>
+            <Typography sx={{ color: "#4B2E1F", fontSize: 18, fontWeight: 700, mb: 2 }}>
+              Competencias formadas
+            </Typography>
+            <Typography sx={{ color: "#7A6252", fontSize: 13, mb: 2 }}>
+              Distribución porcentual de las asistencias registradas por competencia.
+            </Typography>
+            <DonutChart data={competencyChartData} centerLabel="Asistencias" />
+          </Paper>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 2 }}>
             <Typography sx={{ color: "#4B2E1F", fontSize: 22, fontWeight: 800 }}>
               Capacitaciones SST
@@ -1295,16 +1777,104 @@ export function ReportPage() {
           </Box>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 2 }}>
             <Typography sx={{ color: "#4B2E1F", fontSize: 22, fontWeight: 800 }}>
+              Transversales
+            </Typography>
+          </Box>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr", }, gap: 2, }}>
+            <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
+              <CardContent>
+                <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
+                  <Box sx={{ width: 50, height: 50, borderRadius: "50%", bgcolor: "#F7E8D8", color: "#4B2E1F", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <AccessTimeOutlinedIcon />
+                  </Box>
+                  <Box>
+                    <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
+                      Horas totales de capacitación transversal
+                    </Typography>
+                    <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
+                      {transversalTrainingReport?.totalTransversalTrainingHours ?? 0}
+                    </Typography>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+            <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
+              <CardContent>
+                <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
+                  <Box sx={{ width: 50, height: 50, borderRadius: "50%", bgcolor: "#E8F5E9", color: "#2E7D32", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <GroupsOutlinedIcon />
+                  </Box>
+                  <Box>
+                    <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
+                      Personal capacitado en transversales
+                    </Typography>
+                    <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
+                      {transversalTrainingReport?.totalTransversalTrainingPeople ?? 0}
+                    </Typography>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          </Box>
+          <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, overflow: "hidden", bgcolor: "#FFFDF8" }}>
+            <Box sx={{ p: 2 }}>
+              <Typography sx={{ color: "#4B2E1F", fontSize: 18, fontWeight: 700 }}>
+                Personal capacitado en transversales
+              </Typography>
+            </Box>
+            <Box sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 700 }}>
+                <TableHead>
+                  <TableRow sx={{ bgcolor: "#F7E8D8" }}>
+                    <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Cédula</TableCell>
+                    <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Colaborador</TableCell>
+                    <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Centro de soluciones</TableCell>
+                    <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Horas</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(transversalTrainingReport?.byCollaborator ?? []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} align="center" sx={{ color: "#7A6252", py: 3 }}>
+                        No hay registros para mostrar.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    transversalTrainingReport?.byCollaborator.map((item) => (
+                      <TableRow key={item.documentNumberAttendancePerson} hover>
+                        <TableCell>{item.documentNumberAttendancePerson}</TableCell>
+                        <TableCell>{item.fullNameAttendancePerson}</TableCell>
+                        <TableCell>{item.nameSolutionCenter}</TableCell>
+                        <TableCell align="right">{item.totalTransversalTrainingHours}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </Box>
+          </Paper>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 2 }}>
+            <Typography sx={{ color: "#4B2E1F", fontSize: 22, fontWeight: 800 }}>
               General
             </Typography>
           </Box>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr", lg: "1fr 1fr 1fr 1fr", }, gap: 2, }}>
-            <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8", }}>
-              <CardContent>
+            <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8", minWidth: 0, }}>
+              <CardContent sx={{ minWidth: 0 }}>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
                   Centro de soluciones que más capacitó
                 </Typography>
-                <Typography sx={{ color: "#4B2E1F", fontSize: 24, fontWeight: 800 }}>
+                <Typography
+                  title={generalReport?.topTrainingSolutionCenterName ?? "SIN DATOS"}
+                  sx={{
+                    color: "#4B2E1F",
+                    fontSize: { xs: 22, lg: 20 },
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    overflowWrap: "anywhere",
+                    mt: 0.5,
+                  }}
+                >
                   {generalReport?.topTrainingSolutionCenterName ?? "SIN DATOS"}
                 </Typography>
                 <Typography sx={{ color: "#7A6252", fontSize: 13, mt: 0.5 }}>
@@ -1407,6 +1977,192 @@ export function ReportPage() {
               value={averageTrainingTimeReport?.averageTrainingHoursPerWorker ?? 0}
             />
           </Paper>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 2 }}>
+            <Typography sx={{ color: "#4B2E1F", fontSize: 22, fontWeight: 800 }}>
+              Historial de capacitación por colaborador
+            </Typography>
+            <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
+              Consulta por nombre o cédula y revisa sus horas y capacitaciones por centro de soluciones.
+            </Typography>
+          </Box>
+          <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, p: 2, bgcolor: "#FFFDF8" }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "2fr 1fr 1fr auto" }, gap: 2, alignItems: "center" }}>
+              <TextField
+                label="Nombre o cédula del colaborador"
+                value={collaboratorSearch}
+                onChange={(event) => setCollaboratorSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    loadCollaboratorTrainingReport();
+                  }
+                }}
+                size="small"
+                fullWidth
+              />
+              <TextField
+                label="Fecha inicial"
+                type="date"
+                value={collaboratorDateFrom}
+                onChange={(event) => setCollaboratorDateFrom(event.target.value)}
+                size="small"
+                fullWidth
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+              <TextField
+                label="Fecha final"
+                type="date"
+                value={collaboratorDateTo}
+                onChange={(event) => setCollaboratorDateTo(event.target.value)}
+                size="small"
+                fullWidth
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+              <Button
+                variant="contained"
+                startIcon={<SearchOutlinedIcon />}
+                onClick={loadCollaboratorTrainingReport}
+                disabled={loadingCollaborator}
+                sx={{ bgcolor: "#4B2E1F", textTransform: "none", fontWeight: 600, height: 40, whiteSpace: "nowrap", "&:hover": { bgcolor: "#3A2318" } }}
+              >
+                {loadingCollaborator ? "Consultando..." : "Consultar"}
+              </Button>
+            </Box>
+          </Paper>
+
+          {loadingCollaborator ? (
+            <Box sx={{ py: 4, display: "flex", justifyContent: "center" }}>
+              <CircularProgress sx={{ color: "#4B2E1F" }} />
+            </Box>
+          ) : collaboratorReport === null ? (
+            <Paper elevation={0} sx={{ border: "1px dashed #D8C2AE", borderRadius: 3, p: 3, bgcolor: "#FFFDF8", textAlign: "center" }}>
+              <Typography sx={{ color: "#7A6252" }}>
+                Usa los filtros para consultar el historial de un colaborador.
+              </Typography>
+            </Paper>
+          ) : collaboratorReport.collaborators.length === 0 ? (
+            <Paper elevation={0} sx={{ border: "1px dashed #D8C2AE", borderRadius: 3, p: 3, bgcolor: "#FFFDF8", textAlign: "center" }}>
+              <Typography sx={{ color: "#7A6252" }}>
+                No se encontraron capacitaciones para el colaborador y rango indicados.
+              </Typography>
+            </Paper>
+          ) : (
+            <>
+              <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, overflow: "hidden", bgcolor: "#FFFDF8" }}>
+                <Box sx={{ p: 2 }}>
+                  <Typography sx={{ color: "#4B2E1F", fontSize: 18, fontWeight: 700 }}>
+                    Colaboradores encontrados
+                  </Typography>
+                  <Typography sx={{ color: "#7A6252", fontSize: 13 }}>
+                    Selecciona una fila para visualizar su detalle.
+                  </Typography>
+                </Box>
+                <Box sx={{ overflowX: "auto" }}>
+                  <Table size="small" sx={{ minWidth: 760 }}>
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: "#F7E8D8" }}>
+                        <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Cédula</TableCell>
+                        <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Colaborador</TableCell>
+                        <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Centro del colaborador</TableCell>
+                        <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Capacitaciones</TableCell>
+                        <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Horas</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {collaboratorReport.collaborators.map((item) => {
+                        const isSelected =
+                          item.documentNumberAttendancePerson ===
+                          selectedCollaboratorDocument;
+
+                        return (
+                          <TableRow
+                            key={item.documentNumberAttendancePerson}
+                            hover
+                            selected={isSelected}
+                            onClick={() =>
+                              setSelectedCollaboratorDocument(
+                                item.documentNumberAttendancePerson
+                              )
+                            }
+                            sx={{ cursor: "pointer", "&.Mui-selected": { bgcolor: "#F7E8D8" } }}
+                          >
+                            <TableCell>{item.documentNumberAttendancePerson}</TableCell>
+                            <TableCell>{item.fullNameAttendancePerson}</TableCell>
+                            <TableCell>{item.nameSolutionCenter}</TableCell>
+                            <TableCell align="right">{item.totalTrainings}</TableCell>
+                            <TableCell align="right">{item.totalTrainingHours}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </Box>
+              </Paper>
+
+              {selectedCollaborator && (
+                <>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
+                    <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
+                      <CardContent>
+                        <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
+                          Total de capacitaciones recibidas
+                        </Typography>
+                        <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
+                          {selectedCollaborator.totalTrainings}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                    <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
+                      <CardContent>
+                        <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
+                          Total de horas acumuladas
+                        </Typography>
+                        <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
+                          {selectedCollaborator.totalTrainingHours}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Box>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "0.9fr 1.1fr" }, gap: 2 }}>
+                    <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, p: 2, bgcolor: "#FFFDF8" }}>
+                      <Typography sx={{ color: "#4B2E1F", fontSize: 18, fontWeight: 700, mb: 2 }}>
+                        Capacitaciones por centro de soluciones
+                      </Typography>
+                      <DonutChart data={collaboratorDonutData} centerLabel="capacitaciones" />
+                    </Paper>
+                    <Paper elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, overflow: "hidden", bgcolor: "#FFFDF8" }}>
+                      <Box sx={{ p: 2 }}>
+                        <Typography sx={{ color: "#4B2E1F", fontSize: 18, fontWeight: 700 }}>
+                          Capacitaciones recibidas
+                        </Typography>
+                      </Box>
+                      <Box sx={{ overflowX: "auto" }}>
+                        <Table size="small" sx={{ minWidth: 650 }}>
+                          <TableHead>
+                            <TableRow sx={{ bgcolor: "#F7E8D8" }}>
+                              <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Capacitación</TableCell>
+                              <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Fecha</TableCell>
+                              <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>Centro formador</TableCell>
+                              <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>Horas</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {selectedCollaborator.trainings.map((training) => (
+                              <TableRow key={`${training.IdEvent}-${training.dateEvent}`} hover>
+                                <TableCell>{training.titleEvent}</TableCell>
+                                <TableCell>{formatReportDate(training.dateEvent)}</TableCell>
+                                <TableCell>{training.nameSolutionCenter}</TableCell>
+                                <TableCell align="right">{training.trainingHours}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </Box>
+                    </Paper>
+                  </Box>
+                </>
+              )}
+            </>
+          )}
         </>
       )}
 

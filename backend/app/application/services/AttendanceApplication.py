@@ -23,7 +23,10 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
 
     def getEventByToken(self, tokenEvent: str) -> PublicEventResponseDto:
         eventFound = self._getValidEventByToken(tokenEvent)
-        return PublicEventResponseDto.model_validate(eventFound)
+        attendanceCount = self.attendanceRepository.countByEvent(eventFound.IdEvent)
+        return PublicEventResponseDto.model_validate(eventFound).model_copy(
+            update={"attendedPeopleNumber": attendanceCount}
+        )
 
     def getPersonByDocument(self, documentNumber: str):
         cleanDocument = self._cleanRequiredText(documentNumber, "La cédula es obligatoria.")
@@ -43,6 +46,19 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
         personFound = self.attendancePersonRepository.getByDocument(cleanDocument)
         signaturePath = None
 
+        if personFound:
+            existingAttendance = self.attendanceRepository.getByEventAndPerson(
+                eventFound.IdEvent,
+                personFound.IdAttendancePerson,
+            )
+
+            if existingAttendance:
+                raise ValueError(
+                    "Esta persona ya registró asistencia para este evento."
+                )
+
+        self._validateEventCapacity(eventFound)
+
         if personFound and data.signatureBase64:
             signaturePath = self._saveSignature(cleanDocument, data.signatureBase64, personFound.signaturePathAttendancePerson)
 
@@ -60,15 +76,15 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
         else:
             personSaved = self.attendancePersonRepository.create(data, signaturePath)
 
-        existingAttendance = self.attendanceRepository.getByEventAndPerson(eventFound.IdEvent, personSaved.IdAttendancePerson)
-
-        if existingAttendance:
-            raise ValueError("Esta persona ya registró asistencia para este evento.")
-
-        attendanceCreated = self.attendanceRepository.create(eventFound.IdEvent, personSaved.IdAttendancePerson, data.IdPersonnelType, ipAddress, userAgent)
-
-        attendanceCount = self.attendanceRepository.countByEvent(eventFound.IdEvent)
-        self.eventRepository.setAttendedPeopleNumber(eventFound.IdEvent, attendanceCount)
+        attendanceCreated, attendanceCount = (
+            self.attendanceRepository.createWithinCapacity(
+                eventFound.IdEvent,
+                personSaved.IdAttendancePerson,
+                data.IdPersonnelType,
+                ipAddress,
+                userAgent,
+            )
+        )
 
         return AttendanceRegisterResponseDto(
             IdAttendance=attendanceCreated.IdAttendance,
@@ -76,6 +92,21 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
             IdAttendancePerson=personSaved.IdAttendancePerson,
             attendedPeopleNumber=attendanceCount
         )
+
+    def _validateEventCapacity(self, eventFound: Event) -> None:
+        scheduledPeopleNumber = eventFound.scheduledPeopleNumber
+
+        if scheduledPeopleNumber is None:
+            return
+
+        attendanceCount = self.attendanceRepository.countByEvent(
+            eventFound.IdEvent
+        )
+
+        if attendanceCount >= scheduledPeopleNumber:
+            raise ValueError(
+                "Se alcanzó el máximo de colaboradores registrados para este evento."
+            )
 
     def _getValidEventByToken(self, tokenEvent: str) -> Event:
         cleanToken = self._cleanRequiredText(tokenEvent, "El token del evento es obligatorio.")

@@ -20,28 +20,32 @@ class EventRepository(IEventRepository):
         return (self.db.query(Event)
                     .options(joinedload(Event.topics),
                              joinedload(Event.competencies),
-                             joinedload(Event.eventStatus)
+                             joinedload(Event.eventStatus),
+                             joinedload(Event.solutionCenter)
                             ).order_by(Event.IdEvent.desc()).all())
 
     def getByCreatedBy(self, createdByUserLogin: str) -> List[Event]:
         return (self.db.query(Event)
                     .options(joinedload(Event.topics),
                              joinedload(Event.competencies),
-                             joinedload(Event.eventStatus)
+                             joinedload(Event.eventStatus),
+                             joinedload(Event.solutionCenter)
                             ).filter(Event.createdByUserLogin == createdByUserLogin).order_by(Event.IdEvent.desc()).all())
 
     def getById(self, IdEvent: int) -> Optional[Event]:
         return (self.db.query(Event)
                     .options(joinedload(Event.topics),
                              joinedload(Event.competencies),
-                             joinedload(Event.eventStatus)
+                             joinedload(Event.eventStatus),
+                             joinedload(Event.solutionCenter)
                             ).filter(Event.IdEvent == IdEvent).first())
 
     def getByToken(self, tokenEvent: str) -> Optional[Event]:
         return (self.db.query(Event)
                     .options(joinedload(Event.topics),
                              joinedload(Event.competencies),
-                             joinedload(Event.eventStatus)
+                             joinedload(Event.eventStatus),
+                             joinedload(Event.solutionCenter)
                             ).filter(Event.tokenEvent == tokenEvent).first())
     
     def getAttendancesByEvent(self, IdEvent: int) -> List[Attendance]:
@@ -56,6 +60,7 @@ class EventRepository(IEventRepository):
                 joinedload(Event.topics),
                 joinedload(Event.competencies),
                 joinedload(Event.eventStatus),
+                joinedload(Event.solutionCenter),
             )
         )
 

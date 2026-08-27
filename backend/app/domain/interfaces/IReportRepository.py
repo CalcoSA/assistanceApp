@@ -13,6 +13,14 @@ class IReportRepository(ABC):
         pass
 
     @abstractmethod
+    def getTrainingDetailsBySolutionCenter(self, dateFrom: Optional[date], dateTo: Optional[date],):
+        pass
+
+    @abstractmethod
+    def getTrainingByCompetency(self, dateFrom: Optional[date], dateTo: Optional[date],):
+        pass
+
+    @abstractmethod
     def getSstTrainingSummary(self, dateFrom: Optional[date], dateTo: Optional[date],):
         pass
 
@@ -33,9 +41,21 @@ class IReportRepository(ABC):
         pass
 
     @abstractmethod
+    def getTransversalTrainingSummary(self, dateFrom: Optional[date], dateTo: Optional[date],):
+        pass
+
+    @abstractmethod
+    def getTransversalTrainingByCollaborator(self, dateFrom: Optional[date], dateTo: Optional[date],):
+        pass
+
+    @abstractmethod
     def getGeneralSummary(self, dateFrom: Optional[date], dateTo: Optional[date],):
         pass
 
     @abstractmethod
     def getAverageTrainingTimeSummary( self, dateFrom: Optional[date], dateTo: Optional[date], totalWorkers: int,):
+        pass
+
+    @abstractmethod
+    def getCollaboratorTrainingHistory(self, search: str, dateFrom: Optional[date], dateTo: Optional[date],):
         pass
