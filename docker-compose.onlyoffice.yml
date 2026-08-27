@@ -1,15 +1,14 @@
 services:
   onlyoffice-documentserver:
     image: onlyoffice/documentserver:latest
-    container_name: sighacalco_onlyoffice_documentserver
     restart: unless-stopped
     ports:
-      - "8085:80"
+      - "${ONLYOFFICE_HOST_PORT:-8085}:80"
     environment:
-      - JWT_ENABLED=true
-      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET}
-      - JWT_HEADER=Authorization
-      - ALLOW_PRIVATE_IP_ADDRESS=true
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?ONLYOFFICE_JWT_SECRET no configurado}
+      JWT_HEADER: Authorization
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

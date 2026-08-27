@@ -5,9 +5,17 @@ on:
     branches:
       - qa
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-qa
+  cancel-in-progress: false
+
 jobs:
   deploy-qa:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     env:
       VM_HOST: ${{ secrets.VM_HOST }}
@@ -18,43 +26,103 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create backend env file
+      - name: Prepare QA environment files
+        shell: bash
+        env:
+          BACKEND_ENV_CONTENT: ${{ secrets.BACKEND_ENV_QA }}
+          ONLYOFFICE_JWT_SECRET_VALUE: ${{ secrets.ONLYOFFICE_JWT_SECRET_QA }}
+          ONLYOFFICE_PUBLIC_URL_VALUE: ${{ vars.ONLYOFFICE_PUBLIC_URL_QA }}
         run: |
-          cat > backend/.env << 'EOF'
-          ${{ secrets.BACKEND_ENV_QA }}
-          EOF
+          set -euo pipefail
 
-          chmod 600 backend/.env
+          if [[ -z "$BACKEND_ENV_CONTENT" ]]; then
+            echo "El secreto BACKEND_ENV_QA no está configurado."
+            exit 1
+          fi
+
+          if [[ -z "$ONLYOFFICE_JWT_SECRET_VALUE" ]]; then
+            echo "El secreto ONLYOFFICE_JWT_SECRET_QA no está configurado."
+            exit 1
+          fi
+
+          if [[ -z "$ONLYOFFICE_PUBLIC_URL_VALUE" ]]; then
+            echo "La variable ONLYOFFICE_PUBLIC_URL_QA no está configurada."
+            exit 1
+          fi
+
+          printf '%s\n' "$BACKEND_ENV_CONTENT" > backend/.env
+
+          {
+            printf 'ONLYOFFICE_JWT_SECRET=%s\n' "$ONLYOFFICE_JWT_SECRET_VALUE"
+            printf 'ONLYOFFICE_PUBLIC_URL=%s\n' "$ONLYOFFICE_PUBLIC_URL_VALUE"
+            printf 'ONLYOFFICE_HOST_PORT=8085\n'
+          } > .env
+
+          chmod 600 backend/.env .env
 
       - name: Configure SSH
+        shell: bash
+        env:
+          VM_SSH_KEY_VALUE: ${{ secrets.VM_SSH_KEY }}
         run: |
+          set -euo pipefail
+
           mkdir -p ~/.ssh
-
-          cat > ~/.ssh/id_rsa << 'EOF'
-          ${{ secrets.VM_SSH_KEY }}
-          EOF
-
+          printf '%s\n' "$VM_SSH_KEY_VALUE" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts
 
-      - name: Create QA folder on VM
+      - name: Prepare QA folders on VM
+        shell: bash
         run: |
-          ssh "$VM_USER@$VM_HOST" "mkdir -p '$QA_PATH/backend/uploads'"
+          ssh "$VM_USER@$VM_HOST" \
+            "mkdir -p '$QA_PATH/backend/uploads' '$QA_PATH/onlyoffice/logs' '$QA_PATH/onlyoffice/data' '$QA_PATH/onlyoffice/lib'"
 
       - name: Sync project to QA
+        shell: bash
         run: |
           rsync -az --delete \
             --exclude ".git" \
+            --exclude ".github" \
             --exclude "backend/.venv" \
-            --exclude "backend/uploads" \
+            --exclude "backend/uploads/" \
             --exclude "frontend/node_modules" \
             --exclude "frontend/dist" \
+            --exclude "onlyoffice/logs/" \
+            --exclude "onlyoffice/data/" \
+            --exclude "onlyoffice/lib/" \
             ./ "$VM_USER@$VM_HOST:$QA_PATH/"
 
-      - name: Deploy QA with Docker Compose
+      - name: Deploy QA containers
+        shell: bash
         run: |
-          ssh "$VM_USER@$VM_HOST" "
-            cd '$QA_PATH' &&
-            docker-compose -f docker-compose.qa.yml up -d --build --remove-orphans &&
+          ssh "$VM_USER@$VM_HOST" bash -s -- "$QA_PATH" <<'REMOTE_SCRIPT'
+            set -euo pipefail
+
+            DEPLOY_PATH="$1"
+            cd "$DEPLOY_PATH"
+
+            mkdir -p backend/uploads onlyoffice/logs onlyoffice/data onlyoffice/lib
+            chmod 600 backend/.env .env
+
+            if docker compose version >/dev/null 2>&1; then
+              compose() { docker compose "$@"; }
+            elif command -v docker-compose >/dev/null 2>&1; then
+              compose() { docker-compose "$@"; }
+            else
+              echo "Docker Compose no está disponible en la VM."
+              exit 1
+            fi
+
+            compose --env-file .env \
+              -f docker-compose.qa.yml \
+              -f docker-compose.onlyoffice.yml \
+              config >/dev/null
+
+            compose --env-file .env \
+              -f docker-compose.qa.yml \
+              -f docker-compose.onlyoffice.yml \
+              up -d --build --remove-orphans
+
             docker image prune -f
-          "
+          REMOTE_SCRIPT
