@@ -3,7 +3,13 @@ from app.domain.interfaces.IReportRepository import IReportRepository
 from typing import Optional
 from datetime import date
 from app.domain.dtos.ReportDto import (
+    CollaboratorTrainingBySolutionCenterDto,
+    CollaboratorTrainingDetailDto,
+    CollaboratorTrainingReportResponseDto,
+    CollaboratorTrainingSummaryDto,
     TrainingBySolutionCenterDto,
+    TrainingByCompetencyDto,
+    TrainingParticipantDetailDto,
     TrainingReportResponseDto,
     TrainingReportSummaryDto,
     SstTrainingReportResponseDto,
@@ -12,6 +18,8 @@ from app.domain.dtos.ReportDto import (
     TrainingHoursReportResponseDto,
     NewStaffInductionReportResponseDto,
     AdministrativeInductionReportResponseDto,
+    TransversalTrainingByCollaboratorDto,
+    TransversalTrainingReportResponseDto,
     GeneralReportResponseDto,
     AverageTrainingTimeReportResponseDto
 )
@@ -27,6 +35,22 @@ class ReportApplication(IReportApplication):
 
         summary = self.reportRepository.getTrainingSummary(dateFrom, dateTo)
         bySolutionCenter = self.reportRepository.getTrainingBySolutionCenter(dateFrom, dateTo)
+        solutionCenterDetails = self.reportRepository.getTrainingDetailsBySolutionCenter(dateFrom, dateTo)
+        byCompetency = self.reportRepository.getTrainingByCompetency(dateFrom, dateTo)
+        detailsBySolutionCenter = {}
+
+        for item in solutionCenterDetails:
+            solutionCenterName = item.nameSolutionCenter or "SIN CENTRO DE SOLUCIONES"
+            detailsBySolutionCenter.setdefault(solutionCenterName, []).append(
+                TrainingParticipantDetailDto(
+                    IdEvent=item.IdEvent,
+                    titleEvent=item.titleEvent,
+                    dateEvent=item.dateEvent,
+                    documentNumberAttendancePerson=item.documentNumberAttendancePerson,
+                    fullNameAttendancePerson=item.fullNameAttendancePerson,
+                    trainingHours=round(float(item.trainingHours or 0), 2),
+                )
+            )
 
         return TrainingReportResponseDto(
             summary=TrainingReportSummaryDto(
@@ -38,8 +62,20 @@ class ReportApplication(IReportApplication):
                 TrainingBySolutionCenterDto(
                     nameSolutionCenter=item.nameSolutionCenter or "SIN CENTRO DE SOLUCIONES",
                     totalTrainedPeople=item.totalTrainedPeople or 0,
+                    details=detailsBySolutionCenter.get(
+                        item.nameSolutionCenter or "SIN CENTRO DE SOLUCIONES",
+                        [],
+                    ),
                 )
                 for item in bySolutionCenter
+            ],
+            byCompetency=[
+                TrainingByCompetencyDto(
+                    nameCompetency=item.nameCompetency,
+                    totalEvents=int(item.totalEvents or 0),
+                    totalTrainedPeople=int(item.totalTrainedPeople or 0),
+                )
+                for item in byCompetency
             ],
         )
     
@@ -104,6 +140,30 @@ class ReportApplication(IReportApplication):
             totalAdministrativeInductionHours=summary["totalAdministrativeInductionHours"],
             totalAdministrativeInductionPeople=summary["totalAdministrativeInductionPeople"],
         )
+
+    def getTransversalTrainingReport(self, dateFrom: Optional[date], dateTo: Optional[date],):
+        if dateFrom and dateTo and dateFrom > dateTo:
+            raise ValueError("La fecha inicial no puede ser mayor a la fecha final.")
+
+        summary = self.reportRepository.getTransversalTrainingSummary(dateFrom, dateTo)
+        byCollaborator = self.reportRepository.getTransversalTrainingByCollaborator(dateFrom, dateTo)
+
+        return TransversalTrainingReportResponseDto(
+            totalTransversalTrainingHours=summary["totalTransversalTrainingHours"],
+            totalTransversalTrainingPeople=summary["totalTransversalTrainingPeople"],
+            byCollaborator=[
+                TransversalTrainingByCollaboratorDto(
+                    documentNumberAttendancePerson=item.documentNumberAttendancePerson,
+                    fullNameAttendancePerson=item.fullNameAttendancePerson,
+                    nameSolutionCenter=item.nameSolutionCenter or "SIN CENTRO DE SOLUCIONES",
+                    totalTransversalTrainingHours=round(
+                        float(item.totalTransversalTrainingHours or 0),
+                        2,
+                    ),
+                )
+                for item in byCollaborator
+            ],
+        )
     
     def getGeneralReport(self, dateFrom: Optional[date], dateTo: Optional[date],):
         if dateFrom and dateTo and dateFrom > dateTo:
@@ -133,3 +193,83 @@ class ReportApplication(IReportApplication):
             totalInternalTrainingHours=summary["totalInternalTrainingHours"],
             averageTrainingHoursPerWorker=summary["averageTrainingHoursPerWorker"],
         )
+
+    def getCollaboratorTrainingReport(self, search: str, dateFrom: Optional[date], dateTo: Optional[date],):
+        if dateFrom and dateTo and dateFrom > dateTo:
+            raise ValueError("La fecha inicial no puede ser mayor a la fecha final.")
+
+        normalizedSearch = search.strip()
+
+        if not normalizedSearch:
+            raise ValueError("Debe ingresar el nombre o la cédula del colaborador.")
+
+        historyRows = self.reportRepository.getCollaboratorTrainingHistory(
+            normalizedSearch,
+            dateFrom,
+            dateTo,
+        )
+        collaborators = {}
+
+        for item in historyRows:
+            documentNumber = item.documentNumberAttendancePerson
+            collaborator = collaborators.setdefault(
+                documentNumber,
+                {
+                    "documentNumberAttendancePerson": documentNumber,
+                    "fullNameAttendancePerson": item.fullNameAttendancePerson,
+                    "nameSolutionCenter": item.personSolutionCenterName or "SIN CENTRO DE SOLUCIONES",
+                    "totalTrainings": 0,
+                    "totalTrainingHours": 0.0,
+                    "byTrainingSolutionCenter": {},
+                    "trainings": [],
+                },
+            )
+            trainingHours = round(float(item.trainingHours or 0), 2)
+            trainingSolutionCenterName = item.trainingSolutionCenterName or "SIN CENTRO DE SOLUCIONES"
+
+            collaborator["totalTrainings"] += 1
+            collaborator["totalTrainingHours"] += trainingHours
+            collaborator["trainings"].append(
+                CollaboratorTrainingDetailDto(
+                    IdEvent=item.IdEvent,
+                    titleEvent=item.titleEvent,
+                    dateEvent=item.dateEvent,
+                    nameSolutionCenter=trainingSolutionCenterName,
+                    trainingHours=trainingHours,
+                )
+            )
+
+            solutionCenterSummary = collaborator["byTrainingSolutionCenter"].setdefault(
+                trainingSolutionCenterName,
+                {"totalTrainings": 0, "totalTrainingHours": 0.0},
+            )
+            solutionCenterSummary["totalTrainings"] += 1
+            solutionCenterSummary["totalTrainingHours"] += trainingHours
+
+        result = []
+
+        for collaborator in collaborators.values():
+            byTrainingSolutionCenter = [
+                CollaboratorTrainingBySolutionCenterDto(
+                    nameSolutionCenter=nameSolutionCenter,
+                    totalTrainings=values["totalTrainings"],
+                    totalTrainingHours=round(values["totalTrainingHours"], 2),
+                )
+                for nameSolutionCenter, values in sorted(
+                    collaborator["byTrainingSolutionCenter"].items(),
+                    key=lambda item: (-item[1]["totalTrainings"], item[0]),
+                )
+            ]
+            result.append(
+                CollaboratorTrainingSummaryDto(
+                    documentNumberAttendancePerson=collaborator["documentNumberAttendancePerson"],
+                    fullNameAttendancePerson=collaborator["fullNameAttendancePerson"],
+                    nameSolutionCenter=collaborator["nameSolutionCenter"],
+                    totalTrainings=collaborator["totalTrainings"],
+                    totalTrainingHours=round(collaborator["totalTrainingHours"], 2),
+                    byTrainingSolutionCenter=byTrainingSolutionCenter,
+                    trainings=collaborator["trainings"],
+                )
+            )
+
+        return CollaboratorTrainingReportResponseDto(collaborators=result)

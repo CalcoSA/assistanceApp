@@ -29,9 +29,11 @@ export interface Event {
   IdEventStatus: number;
   eventStatus?: EventStatus | null;
   facilitatorNameEvent?: string | null;
+  facilitatorTypeEvent?: "INTERNO" | "EXTERNO" | null;
   facilitatorCompanyEvent?: string | null;
   facilitatorPositionEvent?: string | null;
   secondFacilitatorNameEvent?: string | null;
+  secondFacilitatorTypeEvent?: "INTERNO" | "EXTERNO" | null;
   secondFacilitatorCompanyEvent?: string | null;
   secondFacilitatorPositionEvent?: string | null;
   scheduledPeopleNumber?: number | null;
@@ -53,6 +55,8 @@ export interface Event {
   updatedByUserLogin?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  notificationEmailSent?: boolean | null;
+  notificationMessage?: string | null;
   topics: EventTopic[];
   competencies: EventCompetency[];
 }
@@ -69,9 +73,11 @@ export interface EventCreateRequest {
   IdSpecificTrainingProgram?: number | null;
   IdEventCategory?: number | null;
   facilitatorNameEvent?: string | null;
+  facilitatorTypeEvent?: "INTERNO" | "EXTERNO" | null;
   facilitatorCompanyEvent?: string | null;
   facilitatorPositionEvent?: string | null;
   secondFacilitatorNameEvent?: string | null;
+  secondFacilitatorTypeEvent?: "INTERNO" | "EXTERNO" | null;
   secondFacilitatorCompanyEvent?: string | null;
   secondFacilitatorPositionEvent?: string | null;
   scheduledPeopleNumber?: number | null;

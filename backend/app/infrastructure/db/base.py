@@ -1,5 +1,6 @@
 from app.domain.entities.Role import Role
 from app.domain.entities.Event import Event
+from app.domain.entities.Parameter import Parameter
 from app.infrastructure.db.connection import Base
 from app.domain.entities.MenuOption import MenuOption
 from app.domain.entities.EventTopic import EventTopic

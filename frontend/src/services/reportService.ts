@@ -7,8 +7,11 @@ import type {
   TrainingHoursReportResponse,
   NewStaffInductionReportResponse,
   AdministrativeInductionReportResponse,
+  TransversalTrainingReportResponse,
+  CollaboratorTrainingReportFilter,
+  CollaboratorTrainingReportResponse,
   GeneralReportResponse,
-  AverageTrainingTimeReportResponse
+  AverageTrainingTimeReportResponse,
 } from "../models/Report";
 
 export const reportService = {
@@ -38,6 +41,11 @@ export const reportService = {
     return response.data;
   },
 
+  getTransversalTrainingReport: async (filters: TrainingReportFilter): Promise<ApiResponse<TransversalTrainingReportResponse>> => {
+    const response = await apiClient.get<ApiResponse<TransversalTrainingReportResponse>>("/reports/transversal-training", { params: { dateFrom: filters.dateFrom || undefined, dateTo: filters.dateTo || undefined, },});
+    return response.data;
+  },
+
   getGeneralReport: async (filters: TrainingReportFilter): Promise<ApiResponse<GeneralReportResponse>> => {
     const response = await apiClient.get<ApiResponse<GeneralReportResponse>>("/reports/general", { params: { dateFrom: filters.dateFrom || undefined, dateTo: filters.dateTo || undefined, },});
     return response.data;
@@ -45,6 +53,11 @@ export const reportService = {
 
   getAverageTrainingTimeReport: async (filters: TrainingReportFilter, totalWorkers: number): Promise<ApiResponse<AverageTrainingTimeReportResponse>> => {
     const response = await apiClient.get<ApiResponse<AverageTrainingTimeReportResponse>>("/reports/average-training-time", { params: { dateFrom: filters.dateFrom || undefined, dateTo: filters.dateTo || undefined, totalWorkers, },});
+    return response.data;
+  },
+
+  getCollaboratorTrainingReport: async (filters: CollaboratorTrainingReportFilter): Promise<ApiResponse<CollaboratorTrainingReportResponse>> => {
+    const response = await apiClient.get<ApiResponse<CollaboratorTrainingReportResponse>>("/reports/collaborator-training", { params: { search: filters.search, dateFrom: filters.dateFrom || undefined, dateTo: filters.dateTo || undefined, },});
     return response.data;
   },
 };

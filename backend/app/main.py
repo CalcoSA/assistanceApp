@@ -11,7 +11,10 @@ from app.api.attendanceController import router as attendanceRouter
 from app.api.exceptionHandler import registerExceptionHandlers
 from app.api.reportController import router as reportRouter
 from app.api.eventController import router as eventRouter
+from app.api.parameterController import router as parameterRouter
+from app.api.onlyOfficeController import router as onlyOfficeRouter
 from app.infrastructure.db.connection import Base, engine
+from app.infrastructure.db.catalogSeed import seedRequiredCatalogs
 from app.api.authController import router as authRouter
 from app.api.roleController import router as roleRouter
 from fastapi.middleware.cors import CORSMiddleware
@@ -77,6 +80,7 @@ app.add_middleware(
 )
 
 Base.metadata.create_all(bind=engine)
+seedRequiredCatalogs()
 
 app.include_router(specificTrainingProgramRouter)
 app.include_router(assistanceReasonRouter)
@@ -89,6 +93,8 @@ app.include_router(attendanceRouter)
 app.include_router(menuOptionRouter)
 app.include_router(reportRouter)
 app.include_router(eventRouter)
+app.include_router(parameterRouter)
+app.include_router(onlyOfficeRouter)
 app.include_router(authRouter)
 app.include_router(roleRouter)
 

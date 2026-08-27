@@ -1,5 +1,6 @@
 import type { Event, EventCreateRequest, EventQr, EventAttendance, EventFilterRequest, EventPaginatedResult } from "../models/Event";
 import type { ApiResponse } from "../models/ApiResponse";
+import type { OnlyOfficePreview } from "../models/OnlyOffice";
 import { apiClient } from "./apiClient";
 
 export const eventService = {
@@ -52,6 +53,24 @@ export const eventService = {
     const formData = new FormData();
     formData.append("file", file);
     const response = await apiClient.post<ApiResponse<Event>>(`/events/${IdEvent}/pensum`, formData, { headers: { "Content-Type": "multipart/form-data", },});
+    return response.data;
+  },
+
+  createPensumPreview: async (file: File): Promise<ApiResponse<OnlyOfficePreview>> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await apiClient.post<ApiResponse<OnlyOfficePreview>>(
+      "/onlyoffice/pensum/preview",
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return response.data;
+  },
+
+  getPensumPreview: async (IdEvent: number): Promise<ApiResponse<OnlyOfficePreview>> => {
+    const response = await apiClient.get<ApiResponse<OnlyOfficePreview>>(
+      `/onlyoffice/pensum/events/${IdEvent}`
+    );
     return response.data;
   },
 };

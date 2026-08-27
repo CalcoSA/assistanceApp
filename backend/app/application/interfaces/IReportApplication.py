@@ -25,9 +25,17 @@ class IReportApplication(ABC):
         pass
 
     @abstractmethod
+    def getTransversalTrainingReport(self, dateFrom: Optional[date], dateTo: Optional[date],):
+        pass
+
+    @abstractmethod
     def getGeneralReport(self, dateFrom: Optional[date], dateTo: Optional[date],):
         pass
 
     @abstractmethod
     def getAverageTrainingTimeReport(self, dateFrom: Optional[date], dateTo: Optional[date], totalWorkers: int,):
+        pass
+
+    @abstractmethod
+    def getCollaboratorTrainingReport(self, search: str, dateFrom: Optional[date], dateTo: Optional[date],):
         pass

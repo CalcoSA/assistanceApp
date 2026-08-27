@@ -1,4 +1,5 @@
 from app.domain.dtos.EventStatusDto import EventStatusDto
+from app.domain.dtos.SolutionCenterDto import SolutionCenterResponseDto
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import date, datetime, time
 from typing import List, Optional
@@ -15,9 +16,11 @@ class EventCreateDto(BaseModel):
     IdSpecificTrainingProgram: Optional[int] = None
     IdEventCategory: Optional[int] = None
     facilitatorNameEvent: Optional[str] = None
+    facilitatorTypeEvent: Optional[str] = None
     facilitatorCompanyEvent: Optional[str] = None
     facilitatorPositionEvent: Optional[str] = None
     secondFacilitatorNameEvent: Optional[str] = None
+    secondFacilitatorTypeEvent: Optional[str] = None
     secondFacilitatorCompanyEvent: Optional[str] = None
     secondFacilitatorPositionEvent: Optional[str] = None
     scheduledPeopleNumber: Optional[int] = None
@@ -40,9 +43,11 @@ class EventUpdateDto(BaseModel):
     IdSpecificTrainingProgram: Optional[int] = None
     IdEventCategory: Optional[int] = None
     facilitatorNameEvent: Optional[str] = None
+    facilitatorTypeEvent: Optional[str] = None
     facilitatorCompanyEvent: Optional[str] = None
     facilitatorPositionEvent: Optional[str] = None
     secondFacilitatorNameEvent: Optional[str] = None
+    secondFacilitatorTypeEvent: Optional[str] = None
     secondFacilitatorCompanyEvent: Optional[str] = None
     secondFacilitatorPositionEvent: Optional[str] = None
     scheduledPeopleNumber: Optional[int] = None
@@ -87,10 +92,13 @@ class EventResponseDto(BaseModel):
     IdEventCategory: Optional[int] = None
     IdEventStatus: int
     eventStatus : Optional[EventStatusDto] = None
+    solutionCenter: Optional[SolutionCenterResponseDto] = None
     facilitatorNameEvent: Optional[str] = None
+    facilitatorTypeEvent: Optional[str] = None
     facilitatorCompanyEvent: Optional[str] = None
     facilitatorPositionEvent: Optional[str] = None
     secondFacilitatorNameEvent: Optional[str] = None
+    secondFacilitatorTypeEvent: Optional[str] = None
     secondFacilitatorCompanyEvent: Optional[str] = None
     secondFacilitatorPositionEvent: Optional[str] = None
     scheduledPeopleNumber: Optional[int] = None
@@ -112,6 +120,8 @@ class EventResponseDto(BaseModel):
     updatedByUserLogin: Optional[str] = None
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
+    notificationEmailSent: Optional[bool] = None
+    notificationMessage: Optional[str] = None
     topics: List[EventTopicResponseDto] = Field(default_factory=list)
     competencies: List[EventCompetencyResponseDto] = Field(default_factory=list)
 

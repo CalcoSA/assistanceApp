@@ -7,11 +7,28 @@ export interface TrainingReportSummary {
 export interface TrainingBySolutionCenter {
   nameSolutionCenter: string;
   totalTrainedPeople: number;
+  details: TrainingParticipantDetail[];
+}
+
+export interface TrainingParticipantDetail {
+  IdEvent: number;
+  titleEvent: string;
+  dateEvent: string;
+  documentNumberAttendancePerson: string;
+  fullNameAttendancePerson: string;
+  trainingHours: number;
+}
+
+export interface TrainingByCompetency {
+  nameCompetency: string;
+  totalEvents: number;
+  totalTrainedPeople: number;
 }
 
 export interface TrainingReportResponse {
   summary: TrainingReportSummary;
   bySolutionCenter: TrainingBySolutionCenter[];
+  byCompetency: TrainingByCompetency[];
 }
 
 export interface TrainingReportFilter {
@@ -57,6 +74,19 @@ export interface AdministrativeInductionReportResponse {
   totalAdministrativeInductionPeople: number;
 }
 
+export interface TransversalTrainingByCollaborator {
+  documentNumberAttendancePerson: string;
+  fullNameAttendancePerson: string;
+  nameSolutionCenter: string;
+  totalTransversalTrainingHours: number;
+}
+
+export interface TransversalTrainingReportResponse {
+  totalTransversalTrainingHours: number;
+  totalTransversalTrainingPeople: number;
+  byCollaborator: TransversalTrainingByCollaborator[];
+}
+
 export interface GeneralReportResponse {
   topTrainingSolutionCenterName: string;
   topTrainingSolutionCenterTotal: number;
@@ -69,4 +99,36 @@ export interface AverageTrainingTimeReportResponse {
   totalWorkers: number;
   totalInternalTrainingHours: number;
   averageTrainingHoursPerWorker: number;
+}
+
+export interface CollaboratorTrainingBySolutionCenter {
+  nameSolutionCenter: string;
+  totalTrainings: number;
+  totalTrainingHours: number;
+}
+
+export interface CollaboratorTrainingDetail {
+  IdEvent: number;
+  titleEvent: string;
+  dateEvent: string;
+  nameSolutionCenter: string;
+  trainingHours: number;
+}
+
+export interface CollaboratorTrainingSummary {
+  documentNumberAttendancePerson: string;
+  fullNameAttendancePerson: string;
+  nameSolutionCenter: string;
+  totalTrainings: number;
+  totalTrainingHours: number;
+  byTrainingSolutionCenter: CollaboratorTrainingBySolutionCenter[];
+  trainings: CollaboratorTrainingDetail[];
+}
+
+export interface CollaboratorTrainingReportResponse {
+  collaborators: CollaboratorTrainingSummary[];
+}
+
+export interface CollaboratorTrainingReportFilter extends TrainingReportFilter {
+  search: string;
 }

@@ -11,6 +11,8 @@ class PublicEventResponseDto(BaseModel):
     endTimeEvent: time
     eventPlace: Optional[str] = None
     facilitatorNameEvent: Optional[str] = None
+    scheduledPeopleNumber: Optional[int] = None
+    attendedPeopleNumber: Optional[int] = None
     attendanceStartDateTime: datetime
     attendanceEndDateTime: datetime
 
