@@ -31,7 +31,6 @@ jobs:
         env:
           BACKEND_ENV_CONTENT: ${{ secrets.BACKEND_ENV_QA }}
           ONLYOFFICE_JWT_SECRET_VALUE: ${{ secrets.ONLYOFFICE_JWT_SECRET_QA }}
-          ONLYOFFICE_PUBLIC_URL_VALUE: ${{ vars.ONLYOFFICE_PUBLIC_URL_QA }}
         run: |
           set -euo pipefail
 
@@ -45,16 +44,10 @@ jobs:
             exit 1
           fi
 
-          if [[ -z "$ONLYOFFICE_PUBLIC_URL_VALUE" ]]; then
-            echo "La variable ONLYOFFICE_PUBLIC_URL_QA no está configurada."
-            exit 1
-          fi
-
           printf '%s\n' "$BACKEND_ENV_CONTENT" > backend/.env
 
           {
             printf 'ONLYOFFICE_JWT_SECRET=%s\n' "$ONLYOFFICE_JWT_SECRET_VALUE"
-            printf 'ONLYOFFICE_PUBLIC_URL=%s\n' "$ONLYOFFICE_PUBLIC_URL_VALUE"
             printf 'ONLYOFFICE_HOST_PORT=8085\n'
           } > .env
 
