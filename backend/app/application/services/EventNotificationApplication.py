@@ -268,7 +268,7 @@ class EventNotificationApplication(IEventNotificationApplication):
                   {self._detailRow("Creado por", event.createdByUserLogin)}
                 </table>
                 <div style="margin-top:22px;">{attendanceLink}</div>
-                <p style="margin:24px 0 0;color:#7A6252;font-size:12px;">Este es un mensaje automático.</p>
+                <p style="margin:24px 0 0;color:#7A6252;font-size:12px;">Este es un mensaje automático, por favor no responda a este correo.</p>
               </div>
             </div>
           </body>

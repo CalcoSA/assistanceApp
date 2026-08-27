@@ -23,7 +23,7 @@ class EventCreateDto(BaseModel):
     secondFacilitatorTypeEvent: Optional[str] = None
     secondFacilitatorCompanyEvent: Optional[str] = None
     secondFacilitatorPositionEvent: Optional[str] = None
-    scheduledPeopleNumber: Optional[int] = None
+    scheduledPeopleNumber: Optional[int] = Field(default=None, ge=0)
     isPaidTrainingEvent: Optional[bool] = None
     isNewStaffInductionEvent: Optional[bool] = False
     observationsEvent: Optional[str] = None
@@ -50,7 +50,7 @@ class EventUpdateDto(BaseModel):
     secondFacilitatorTypeEvent: Optional[str] = None
     secondFacilitatorCompanyEvent: Optional[str] = None
     secondFacilitatorPositionEvent: Optional[str] = None
-    scheduledPeopleNumber: Optional[int] = None
+    scheduledPeopleNumber: Optional[int] = Field(default=None, ge=0)
     isPaidTrainingEvent: Optional[bool] = None
     isNewStaffInductionEvent: Optional[bool] = None
     observationsEvent: Optional[str] = None
