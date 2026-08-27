@@ -3,7 +3,7 @@ services:
     image: onlyoffice/documentserver:latest
     restart: unless-stopped
     ports:
-      - "${ONLYOFFICE_HOST_PORT:-8085}:80"
+      - "${ONLYOFFICE_HOST_PORT:-8086}:80"
     environment:
       JWT_ENABLED: "true"
       JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?ONLYOFFICE_JWT_SECRET no configurado}

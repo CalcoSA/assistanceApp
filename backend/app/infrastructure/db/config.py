@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     PUBLIC_BASE_URL: str = "http://localhost:5173"
     UPLOAD_DIR: str = "uploads"
 
-    ONLYOFFICE_PUBLIC_URL: str = "http://localhost:8085"
+    ONLYOFFICE_PUBLIC_URL: str = "http://localhost:8086"
     ONLYOFFICE_STORAGE_BASE_URL: str = "http://host.docker.internal:8000"
     ONLYOFFICE_JWT_SECRET: str | None = None
     ONLYOFFICE_TOKEN_EXPIRE_MINUTES: int = 30
