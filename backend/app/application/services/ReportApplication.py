@@ -224,7 +224,7 @@ class ReportApplication(IReportApplication):
                     "trainings": [],
                 },
             )
-            trainingHours = round(float(item.trainingHours or 0), 2)
+            trainingHours = float(item.trainingHours or 0)
             trainingSolutionCenterName = item.trainingSolutionCenterName or "SIN CENTRO DE SOLUCIONES"
 
             collaborator["totalTrainings"] += 1
@@ -235,7 +235,7 @@ class ReportApplication(IReportApplication):
                     titleEvent=item.titleEvent,
                     dateEvent=item.dateEvent,
                     nameSolutionCenter=trainingSolutionCenterName,
-                    trainingHours=trainingHours,
+                    trainingHours=round(trainingHours, 2),
                 )
             )
 

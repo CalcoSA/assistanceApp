@@ -150,6 +150,23 @@ const getBogotaDateTime = () => {
 const formatDropdownOption = (value: string) =>
   value.toLocaleUpperCase("es-CO");
 
+const eventCategoryDescriptions: Record<string, string> = {
+  PERSONAL: "Desarrollo y crecimiento personal.",
+  CARGO: "Conocimientos y habilidades propias del cargo.",
+  "MULTIPLES FUNCIONES":
+    "Conocimientos y mejora de habilidades laborales aplicables a diferentes funciones.",
+};
+
+const getEventCategoryDescription = (categoryName: string) => {
+  const normalizedName = categoryName
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleUpperCase("es-CO");
+
+  return eventCategoryDescriptions[normalizedName] ?? "";
+};
+
 const calculateDuration = (startTime: string, endTime: string) => {
   const [startHour, startMinute] = startTime
     .substring(0, 5)
@@ -389,6 +406,7 @@ export function EventPage() {
   const [eventCategories, setEventCategories] = useState<EventCategory[]>([]);  
   const [eventForm, setEventForm] = useState<EventFormState>(emptyEventForm);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [activeCategoryTooltipId, setActiveCategoryTooltipId] = useState<number | null>(null);
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [signaturePersonName, setSignaturePersonName] = useState("");
   const [competencies, setCompetencies] = useState<Competency[]>([]);
@@ -684,6 +702,7 @@ export function EventPage() {
     if (saving) return;
     resetPensumPreview();
     setCompetenciesMenuOpen(false);
+    setActiveCategoryTooltipId(null);
     setEventModalOpen(false);
     setSelectedEvent(null);
     setPensumFile(null);
@@ -837,6 +856,34 @@ export function EventPage() {
     const missingField = requiredFields.find((field) => !field.value || field.value.toString().trim() === "");
     if (missingField) {
       showResponseModal("warning", "Campo obligatorio", `El campo "${missingField.label}" es obligatorio.`);
+      return false;
+    }
+
+    const scheduledPeopleNumber = Number(eventForm.scheduledPeopleNumber);
+
+    if (
+      !Number.isInteger(scheduledPeopleNumber) ||
+      scheduledPeopleNumber < 0
+    ) {
+      showResponseModal(
+        "warning",
+        "Cantidad no válida",
+        "El número de personas programadas debe ser un entero mayor o igual a cero."
+      );
+      return false;
+    }
+
+    const registeredPeople = selectedEvent?.attendedPeopleNumber ?? 0;
+
+    if (
+      eventModalMode === "update" &&
+      scheduledPeopleNumber < registeredPeople
+    ) {
+      showResponseModal(
+        "warning",
+        "Cantidad no válida",
+        `Las personas programadas no pueden ser menores que los ${registeredPeople} asistentes ya registrados.`
+      );
       return false;
     }
 
@@ -2049,15 +2096,69 @@ export function EventPage() {
               </FormControl>
               <FormControl required fullWidth disabled={ eventModalMode === "view" || saving }>
                 <InputLabel>Categoría</InputLabel>
-                <Select label="Categoría" value={ eventForm.IdEventCategory } onChange={(event) => handleEventFormChange("IdEventCategory", event.target.value) }>
+                <Select
+                  label="Categoría"
+                  value={eventForm.IdEventCategory}
+                  onChange={(event) => {
+                    setActiveCategoryTooltipId(null);
+                    handleEventFormChange(
+                      "IdEventCategory",
+                      event.target.value
+                    );
+                  }}
+                  onClose={() => setActiveCategoryTooltipId(null)}
+                >
                   <MenuItem value="">
                     <em>Seleccione</em>
                   </MenuItem>
-                  { eventCategories.map((item) => (
-                    <MenuItem key={ item.IdEventCategory } value={ item.IdEventCategory.toString() }>
-                      {formatDropdownOption(item.nameEventCategory)}
-                    </MenuItem>
-                  ))}
+                  {eventCategories.map((item) => {
+                    const categoryLabel = formatDropdownOption(
+                      item.nameEventCategory
+                    );
+                    const categoryDescription = getEventCategoryDescription(
+                      item.nameEventCategory
+                    );
+
+                    return (
+                      <MenuItem
+                        key={item.IdEventCategory}
+                        value={item.IdEventCategory.toString()}
+                        aria-label={
+                          categoryDescription
+                            ? `${categoryLabel}. ${categoryDescription}`
+                            : categoryLabel
+                        }
+                        onMouseEnter={() =>
+                          setActiveCategoryTooltipId(item.IdEventCategory)
+                        }
+                        onMouseLeave={() => setActiveCategoryTooltipId(null)}
+                        onFocus={() =>
+                          setActiveCategoryTooltipId(item.IdEventCategory)
+                        }
+                        onBlur={() => setActiveCategoryTooltipId(null)}
+                      >
+                        <Tooltip
+                          title={categoryDescription}
+                          placement="right"
+                          arrow
+                          describeChild
+                          disableHoverListener
+                          disableFocusListener
+                          open={
+                            Boolean(categoryDescription) &&
+                            activeCategoryTooltipId === item.IdEventCategory
+                          }
+                        >
+                          <Box
+                            component="span"
+                            sx={{ display: "block", width: "100%" }}
+                          >
+                            {categoryLabel}
+                          </Box>
+                        </Tooltip>
+                      </MenuItem>
+                    );
+                  })}
                 </Select>
               </FormControl>
               <Box
@@ -2244,9 +2345,14 @@ export function EventPage() {
                 value={eventForm.scheduledPeopleNumber}
                 disabled={eventModalMode === "view" || saving}
                 fullWidth
-                onChange={(event) =>
-                    handleEventFormChange("scheduledPeopleNumber", event.target.value)
-                }
+                slotProps={{ htmlInput: { min: 0, step: 1 } }}
+                onChange={(event) => {
+                  const value = event.target.value;
+
+                  if (value === "" || /^\d+$/.test(value)) {
+                    handleEventFormChange("scheduledPeopleNumber", value);
+                  }
+                }}
               />
               <FormControl required disabled={eventModalMode === "view" || saving}>
                 <RadioGroup
