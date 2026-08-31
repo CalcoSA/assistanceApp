@@ -41,7 +41,7 @@ class AttendanceRepository(IAttendanceRepository):
     def countByEvent(self, IdEvent: int) -> int:
         return (self.db.query(Attendance).filter(Attendance.IdEvent == IdEvent).count())
 
-    def createWithinCapacity(self, IdEvent: int, IdAttendancePerson: int, IdPersonnelType: int, ipAddress: str | None, userAgent: str | None) -> tuple[Attendance, int]:
+    def createAndCount(self, IdEvent: int, IdAttendancePerson: int, IdPersonnelType: int, ipAddress: str | None, userAgent: str | None) -> tuple[Attendance, int]:
         try:
             eventFound = (
                 self.db.query(Event)
@@ -54,15 +54,6 @@ class AttendanceRepository(IAttendanceRepository):
                 raise ValueError("El evento no existe.")
 
             attendanceCount = self.countByEvent(IdEvent)
-            scheduledPeopleNumber = eventFound.scheduledPeopleNumber
-
-            if (
-                scheduledPeopleNumber is not None
-                and attendanceCount >= scheduledPeopleNumber
-            ):
-                raise ValueError(
-                    "Se alcanzó el máximo de colaboradores registrados para este evento."
-                )
 
             existingAttendance = self.getByEventAndPerson(
                 IdEvent,

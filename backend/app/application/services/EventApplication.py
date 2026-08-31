@@ -6,7 +6,7 @@ from app.domain.dtos.EventDto import EventAttendanceResponseDto
 from app.infrastructure.db.config import APP_TIMEZONE_INFO, settings
 from app.domain.entities.Event import Event
 from fastapi import UploadFile
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import qrcode
 import uuid
 import os
@@ -27,6 +27,7 @@ class EventApplication(IEventApplication):
         FACILITATOR_TYPE_INTERNAL,
         FACILITATOR_TYPE_EXTERNAL,
     }
+    ATTENDANCE_GRACE_PERIOD = timedelta(minutes=30)
 
     def __init__(
         self,
@@ -114,7 +115,10 @@ class EventApplication(IEventApplication):
 
         createdAt = self._currentDateTime()
         attendanceStartDateTime = createdAt
-        attendanceEndDateTime = datetime.combine(eventData.dateEvent, eventData.endTimeEvent)
+        attendanceEndDateTime = self._getAttendanceEndDateTime(
+            eventData.dateEvent,
+            eventData.endTimeEvent,
+        )
 
         if attendanceEndDateTime <= createdAt:
             raise ValueError("La fecha y hora final del evento debe ser mayor a la fecha y hora actual.")
@@ -190,15 +194,6 @@ class EventApplication(IEventApplication):
             self._validateUpdateAfterEventStarted(eventData, eventFound)
         else:
             self._validateUpdateBeforeEventStarted(eventData, eventFound)
-
-        if eventData.scheduledPeopleNumber is not None:
-            attendanceCount = self.eventRepository.countAttendances(IdEvent)
-
-            if eventData.scheduledPeopleNumber < attendanceCount:
-                raise ValueError(
-                    "Las personas programadas no pueden ser menores que "
-                    f"los {attendanceCount} asistentes ya registrados."
-                )
 
         facilitatorData = self._normalizeEventFacilitators(
             facilitatorName=self._getFinalUpdateValue(
@@ -293,11 +288,13 @@ class EventApplication(IEventApplication):
                 finalEndTimeEvent,
             )
 
-        if eventData.dateEvent is not None or eventData.endTimeEvent is not None:
-            updateData["attendanceEndDateTime"] = datetime.combine(finalDateEvent, finalEndTimeEvent)
+        updateData["attendanceEndDateTime"] = self._getAttendanceEndDateTime(
+            finalDateEvent,
+            finalEndTimeEvent,
+        )
 
         updateData["updatedByUserLogin"] = userLogin
-        updateData["updatedAt"] = datetime.now()
+        updateData["updatedAt"] = self._currentDateTime()
 
         eventUpdated = self.eventRepository.update(IdEvent, updateData, eventData.topics, eventData.competencies)
 
@@ -412,7 +409,7 @@ class EventApplication(IEventApplication):
 
         finalEndDateTime = datetime.combine(finalDateEvent, finalEndTimeEvent)
 
-        if finalEndDateTime <= datetime.now():
+        if finalEndDateTime <= self._currentDateTime():
             raise ValueError("La fecha y hora final del evento debe ser mayor a la fecha y hora actual.")
 
     def _validateUpdateAfterEventStarted(
@@ -440,10 +437,44 @@ class EventApplication(IEventApplication):
 
     def _eventHasStarted(self, event: Event) -> bool:
         eventStartDateTime = datetime.combine(event.dateEvent, event.startTimeEvent)
-        return datetime.now() >= eventStartDateTime
+        return self._currentDateTime() >= eventStartDateTime
 
     def _syncStatusByEndDateTime(self, event: Event) -> Event:
-        if (event.IdEventStatus == self.STATUS_ACTIVE and datetime.now() > event.attendanceEndDateTime):
+        eventEndDateTime = datetime.combine(
+            event.dateEvent,
+            event.endTimeEvent,
+        )
+        attendanceEndDateTime = self._getAttendanceEndDateTime(
+            event.dateEvent,
+            event.endTimeEvent,
+        )
+        currentDateTime = self._currentDateTime()
+        wasInactiveWithLegacyWindow = (
+            event.IdEventStatus == self.STATUS_INACTIVE
+            and event.attendanceEndDateTime == eventEndDateTime
+            and currentDateTime <= attendanceEndDateTime
+        )
+
+        if event.attendanceEndDateTime != attendanceEndDateTime:
+            updatedEvent = self.eventRepository.update(
+                event.IdEvent,
+                {"attendanceEndDateTime": attendanceEndDateTime},
+                None,
+                None,
+            )
+            event = updatedEvent if updatedEvent else event
+
+        if wasInactiveWithLegacyWindow:
+            updatedEvent = self.eventRepository.setStatus(
+                event.IdEvent,
+                self.STATUS_ACTIVE,
+            )
+            event = updatedEvent if updatedEvent else event
+
+        if (
+            event.IdEventStatus == self.STATUS_ACTIVE
+            and currentDateTime > attendanceEndDateTime
+        ):
             updatedEvent = self.eventRepository.setStatus(event.IdEvent, self.STATUS_INACTIVE)
 
             return updatedEvent if updatedEvent else event
@@ -467,6 +498,12 @@ class EventApplication(IEventApplication):
 
     def _currentDateTime(self) -> datetime:
         return datetime.now(APP_TIMEZONE_INFO).replace(tzinfo=None)
+
+    def _getAttendanceEndDateTime(self, eventDate, eventEndTime) -> datetime:
+        return (
+            datetime.combine(eventDate, eventEndTime)
+            + self.ATTENDANCE_GRACE_PERIOD
+        )
 
     def _uppercaseOptionalText(self, value: str | None) -> str | None:
         return value.strip().upper() if value is not None else None
