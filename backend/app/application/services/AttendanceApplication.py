@@ -5,7 +5,8 @@ from app.domain.interfaces.IPersonnelTypeRepository import IPersonnelTypeReposit
 from app.domain.interfaces.IAttendanceRepository import IAttendanceRepository
 from app.domain.interfaces.IEventRepository import IEventRepository
 from app.domain.entities.Event import Event
-from datetime import datetime
+from app.infrastructure.db.config import APP_TIMEZONE_INFO
+from datetime import datetime, timedelta
 import base64
 import os
 import re
@@ -13,6 +14,9 @@ import re
 class PublicAttendanceApplication(IPublicAttendanceApplication):
 
     STATUS_ACTIVE_NAME = "activo"
+    STATUS_ACTIVE = 1
+    STATUS_INACTIVE = 2
+    ATTENDANCE_GRACE_PERIOD = timedelta(minutes=30)
 
     def __init__(self, eventRepository: IEventRepository, attendancePersonRepository: IAttendancePersonRepository, attendanceRepository: IAttendanceRepository, personnelTypeRepository: IPersonnelTypeRepository):
         self.eventRepository = eventRepository
@@ -57,8 +61,6 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
                     "Esta persona ya registró asistencia para este evento."
                 )
 
-        self._validateEventCapacity(eventFound)
-
         if personFound and data.signatureBase64:
             signaturePath = self._saveSignature(cleanDocument, data.signatureBase64, personFound.signaturePathAttendancePerson)
 
@@ -77,7 +79,7 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
             personSaved = self.attendancePersonRepository.create(data, signaturePath)
 
         attendanceCreated, attendanceCount = (
-            self.attendanceRepository.createWithinCapacity(
+            self.attendanceRepository.createAndCount(
                 eventFound.IdEvent,
                 personSaved.IdAttendancePerson,
                 data.IdPersonnelType,
@@ -93,21 +95,6 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
             attendedPeopleNumber=attendanceCount
         )
 
-    def _validateEventCapacity(self, eventFound: Event) -> None:
-        scheduledPeopleNumber = eventFound.scheduledPeopleNumber
-
-        if scheduledPeopleNumber is None:
-            return
-
-        attendanceCount = self.attendanceRepository.countByEvent(
-            eventFound.IdEvent
-        )
-
-        if attendanceCount >= scheduledPeopleNumber:
-            raise ValueError(
-                "Se alcanzó el máximo de colaboradores registrados para este evento."
-            )
-
     def _getValidEventByToken(self, tokenEvent: str) -> Event:
         cleanToken = self._cleanRequiredText(tokenEvent, "El token del evento es obligatorio.")
 
@@ -116,18 +103,68 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
         if not eventFound:
             raise ValueError("El evento no existe o el enlace no es válido.")
 
+        now = self._currentDateTime()
+        eventFound, attendanceEndDateTime = self._syncAttendanceWindow(
+            eventFound,
+            now,
+        )
+
+        if now > attendanceEndDateTime:
+            if eventFound.IdEventStatus == self.STATUS_ACTIVE:
+                self.eventRepository.setStatus(
+                    eventFound.IdEvent,
+                    self.STATUS_INACTIVE,
+                )
+
+            raise ValueError("El formulario de asistencia ya no está disponible.")
+
         if not self._eventIsActive(eventFound):
             raise ValueError("El formulario de asistencia no está disponible porque el evento no está activo.")
-
-        now = datetime.now()
 
         if now < eventFound.attendanceStartDateTime:
             raise ValueError("El formulario de asistencia aún no está disponible.")
 
-        if now > eventFound.attendanceEndDateTime:
-            raise ValueError("El formulario de asistencia ya no está disponible.")
-
         return eventFound
+
+    def _currentDateTime(self) -> datetime:
+        return datetime.now(APP_TIMEZONE_INFO).replace(tzinfo=None)
+
+    def _getAttendanceEndDateTime(self, event: Event) -> datetime:
+        return (
+            datetime.combine(event.dateEvent, event.endTimeEvent)
+            + self.ATTENDANCE_GRACE_PERIOD
+        )
+
+    def _syncAttendanceWindow(
+        self,
+        event: Event,
+        currentDateTime: datetime,
+    ) -> tuple[Event, datetime]:
+        eventEndDateTime = datetime.combine(event.dateEvent, event.endTimeEvent)
+        attendanceEndDateTime = self._getAttendanceEndDateTime(event)
+        wasInactiveWithLegacyWindow = (
+            event.IdEventStatus == self.STATUS_INACTIVE
+            and event.attendanceEndDateTime == eventEndDateTime
+            and currentDateTime <= attendanceEndDateTime
+        )
+
+        if event.attendanceEndDateTime != attendanceEndDateTime:
+            updatedEvent = self.eventRepository.update(
+                event.IdEvent,
+                {"attendanceEndDateTime": attendanceEndDateTime},
+                None,
+                None,
+            )
+            event = updatedEvent if updatedEvent else event
+
+        if wasInactiveWithLegacyWindow:
+            updatedEvent = self.eventRepository.setStatus(
+                event.IdEvent,
+                self.STATUS_ACTIVE,
+            )
+            event = updatedEvent if updatedEvent else event
+
+        return event, attendanceEndDateTime
 
     def _eventIsActive(self, event: Event) -> bool:
         if not event.eventStatus or not event.eventStatus.nameEventStatus:

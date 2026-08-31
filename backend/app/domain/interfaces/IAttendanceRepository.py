@@ -13,7 +13,7 @@ class IAttendanceRepository(ABC):
         pass
 
     @abstractmethod
-    def createWithinCapacity(self, IdEvent: int, IdAttendancePerson: int, IdPersonnelType: int, ipAddress: str | None, userAgent: str | None) -> tuple[Attendance, int]:
+    def createAndCount(self, IdEvent: int, IdAttendancePerson: int, IdPersonnelType: int, ipAddress: str | None, userAgent: str | None) -> tuple[Attendance, int]:
         pass
 
     @abstractmethod

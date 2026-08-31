@@ -873,20 +873,6 @@ export function EventPage() {
       return false;
     }
 
-    const registeredPeople = selectedEvent?.attendedPeopleNumber ?? 0;
-
-    if (
-      eventModalMode === "update" &&
-      scheduledPeopleNumber < registeredPeople
-    ) {
-      showResponseModal(
-        "warning",
-        "Cantidad no válida",
-        `Las personas programadas no pueden ser menores que los ${registeredPeople} asistentes ya registrados.`
-      );
-      return false;
-    }
-
     if (eventForm.startTimeEvent >= eventForm.endTimeEvent) {
       showResponseModal(
         "warning",
