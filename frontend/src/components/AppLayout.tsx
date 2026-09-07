@@ -10,6 +10,7 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import EventOutlinedIcon from "@mui/icons-material/EventOutlined";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
+import PsychologyOutlinedIcon from "@mui/icons-material/PsychologyOutlined";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import InstagramIcon from "@mui/icons-material/Instagram";
 import LanguageIcon from "@mui/icons-material/Language";
@@ -55,6 +56,11 @@ const masterItems: MenuItem[] = [
     path: "/maestros/parametros",
     icon: <TuneOutlinedIcon />,
   },
+  {
+    label: "Competencias",
+    path: "/maestros/competencias",
+    icon: <PsychologyOutlinedIcon />,
+  },
 ];
 
 const mainItems: MenuItem[] = [
@@ -70,7 +76,11 @@ const mainItems: MenuItem[] = [
   },
 ];
 
-type HelpPath = "/eventos" | "/reportes" | "/maestros/parametros";
+type HelpPath =
+  | "/eventos"
+  | "/reportes"
+  | "/maestros/parametros"
+  | "/maestros/competencias";
 
 interface HelpStep {
   title: string;
@@ -91,6 +101,10 @@ const getHelpPathFromCurrentRoute = (pathname: string): HelpPath => {
 
   if (pathname.startsWith("/maestros/parametros")) {
     return "/maestros/parametros";
+  }
+
+  if (pathname.startsWith("/maestros/competencias")) {
+    return "/maestros/competencias";
   }
 
   return "/eventos";
@@ -207,6 +221,38 @@ const helpContentByPath: Record<HelpPath, HelpContent> = {
       "Las credenciales del servidor de correo se administran exclusivamente en el entorno del backend.",
       "Crear un parámetro nuevo solo almacena una clave y su valor; tendrá efecto cuando algún proceso de la aplicación use expresamente ese nombre.",
       "Evita eliminar parámetros desconocidos sin confirmar qué proceso los utiliza.",
+    ],
+  },
+  "/maestros/competencias": {
+    title: "Instructivo - Competencias",
+    description:
+      "Esta opción administra las competencias disponibles en la creación y actualización de eventos.",
+    steps: [
+      {
+        title: "Consulta las competencias",
+        description:
+          "Revisa el listado actual antes de crear una nueva opción para evitar nombres duplicados.",
+      },
+      {
+        title: "Crea una competencia",
+        description:
+          "Presiona Crear competencia, ingresa el nombre y guarda. El sistema lo normaliza en mayúsculas.",
+      },
+      {
+        title: "Actualiza el nombre",
+        description:
+          "Usa la acción de edición para corregir el nombre. El cambio se reflejará en los eventos y reportes relacionados.",
+      },
+      {
+        title: "Elimina cuando corresponda",
+        description:
+          "Confirma la eliminación desde la tabla. Una competencia relacionada con eventos no puede eliminarse para proteger la información histórica.",
+      },
+    ],
+    recommendations: [
+      "Usa nombres claros y evita crear competencias equivalentes con diferencias ortográficas.",
+      "Antes de renombrar, valida que el nuevo nombre conserve el significado de los eventos existentes.",
+      "Si una competencia ya fue utilizada, actualízala en lugar de intentar eliminarla.",
     ],
   },
 };
@@ -1278,7 +1324,8 @@ function Footer() {
                 display: "grid",
                 gridTemplateColumns: {
                   xs: "1fr",
-                  md: "repeat(3, minmax(0, 1fr))",
+                  sm: "repeat(2, minmax(0, 1fr))",
+                  lg: "repeat(4, minmax(0, 1fr))",
                 },
                 gap: 1.5,
                 mb: 3,
@@ -1381,6 +1428,41 @@ function Footer() {
                 }}
               >
                 Parámetros
+              </Button>
+
+              <Button
+                variant={
+                  selectedHelpPath === "/maestros/competencias"
+                    ? "contained"
+                    : "outlined"
+                }
+                startIcon={<PsychologyOutlinedIcon />}
+                onClick={() =>
+                  setSelectedHelpPath("/maestros/competencias")
+                }
+                sx={{
+                  textTransform: "none",
+                  justifyContent: "flex-start",
+                  fontWeight: 600,
+                  borderColor: "#8B6A55",
+                  bgcolor:
+                    selectedHelpPath === "/maestros/competencias"
+                      ? "#4B2E1F"
+                      : "transparent",
+                  color:
+                    selectedHelpPath === "/maestros/competencias"
+                      ? "#FFFFFF"
+                      : "#4B2E1F",
+                  "&:hover": {
+                    borderColor: "#4B2E1F",
+                    bgcolor:
+                      selectedHelpPath === "/maestros/competencias"
+                        ? "#3A2318"
+                        : "rgba(75, 46, 31, 0.05)",
+                  },
+                }}
+              >
+                Competencias
               </Button>
             </Stack>
 

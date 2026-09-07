@@ -12,6 +12,7 @@ from datetime import date
 from app.domain.dtos.ReportDto import (
     TrainingReportResponseDto,
     SstTrainingReportResponseDto,
+    ThematicTrainingReportResponseDto,
     TrainingHoursReportResponseDto,
     NewStaffInductionReportResponseDto,
     AdministrativeInductionReportResponseDto,
@@ -65,6 +66,36 @@ def getSstTrainingReport(dateFrom: Optional[date] = Query(None), dateTo: Optiona
 
     except Exception:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al obtener el reporte de capacitación SST.",)
+
+@router.get(
+    "/thematic-training",
+    response_model=apiResponseDto[ThematicTrainingReportResponseDto],
+)
+def getThematicTrainingReport(
+    dateFrom: Optional[date] = Query(None),
+    dateTo: Optional[date] = Query(None),
+    authContext: dict = Depends(getCurrentAuthContext),
+    service: IReportApplication = Depends(getReportApplication),
+):
+    try:
+        data = service.getThematicTrainingReport(dateFrom, dateTo)
+        return apiResponseDto(
+            isSuccess=True,
+            Message="Reportes temáticos de capacitación obtenidos correctamente.",
+            result=data,
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al obtener los reportes temáticos de capacitación.",
+        )
     
 @router.get("/training-hours", response_model=apiResponseDto[TrainingHoursReportResponseDto])
 def getTrainingHoursReport(dateFrom: Optional[date] = Query(None), dateTo: Optional[date] = Query(None), authContext: dict = Depends(getCurrentAuthContext), service: IReportApplication = Depends(getReportApplication),):

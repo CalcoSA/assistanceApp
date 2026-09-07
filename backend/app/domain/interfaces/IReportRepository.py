@@ -49,6 +49,18 @@ class IReportRepository(ABC):
         pass
 
     @abstractmethod
+    def getThematicTrainingSummary(self, themeKey: str, dateFrom: Optional[date], dateTo: Optional[date],):
+        pass
+
+    @abstractmethod
+    def getThematicTrainingByCollaborator(self, themeKey: str, dateFrom: Optional[date], dateTo: Optional[date],):
+        pass
+
+    @abstractmethod
+    def getThematicTrainingByTopic(self, themeKey: str, dateFrom: Optional[date], dateTo: Optional[date],):
+        pass
+
+    @abstractmethod
     def getGeneralSummary(self, dateFrom: Optional[date], dateTo: Optional[date],):
         pass
 

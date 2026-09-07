@@ -12,6 +12,7 @@ import type {
   CollaboratorTrainingReportResponse,
   GeneralReportResponse,
   AverageTrainingTimeReportResponse,
+  ThematicTrainingReportResponse,
 } from "../models/Report";
 
 export const reportService = {
@@ -48,6 +49,11 @@ export const reportService = {
 
   getGeneralReport: async (filters: TrainingReportFilter): Promise<ApiResponse<GeneralReportResponse>> => {
     const response = await apiClient.get<ApiResponse<GeneralReportResponse>>("/reports/general", { params: { dateFrom: filters.dateFrom || undefined, dateTo: filters.dateTo || undefined, },});
+    return response.data;
+  },
+
+  getThematicTrainingReport: async (filters: TrainingReportFilter): Promise<ApiResponse<ThematicTrainingReportResponse>> => {
+    const response = await apiClient.get<ApiResponse<ThematicTrainingReportResponse>>("/reports/thematic-training", { params: { dateFrom: filters.dateFrom || undefined, dateTo: filters.dateTo || undefined, },});
     return response.data;
   },
 

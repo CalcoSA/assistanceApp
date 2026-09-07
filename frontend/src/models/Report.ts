@@ -87,6 +87,37 @@ export interface TransversalTrainingReportResponse {
   byCollaborator: TransversalTrainingByCollaborator[];
 }
 
+export interface TrainingTopicIndicator {
+  nameEventTopic: string;
+  totalTrainings: number;
+  totalTrainedPeople: number;
+}
+
+export interface ThematicTrainingSummary {
+  totalInternalTrainedPeople: number;
+  totalTrainingHours: number;
+  averageTrainingHoursPerInternalCollaborator: number;
+}
+
+export interface ThematicTrainingByCollaborator {
+  documentNumberAttendancePerson: string;
+  fullNameAttendancePerson: string;
+  nameSolutionCenter: string;
+  totalTrainingHours: number;
+}
+
+export interface ThematicTrainingSection {
+  key: string;
+  name: string;
+  summary: ThematicTrainingSummary;
+  byCollaborator: ThematicTrainingByCollaborator[];
+  byTopic: TrainingTopicIndicator[];
+}
+
+export interface ThematicTrainingReportResponse {
+  reports: ThematicTrainingSection[];
+}
+
 export interface GeneralReportResponse {
   topTrainingSolutionCenterName: string;
   topTrainingSolutionCenterTotal: number;

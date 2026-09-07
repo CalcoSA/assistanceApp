@@ -10,6 +10,7 @@ import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
+import { ThematicTrainingSectionPanel } from "../components/ThematicTrainingSection";
 import { getErrorMessage } from "../services/errorService";
 import { reportService } from "../services/reportService";
 import { Fragment, useEffect, useState } from "react";
@@ -23,7 +24,8 @@ import type {
   TransversalTrainingReportResponse,
   CollaboratorTrainingReportResponse,
   GeneralReportResponse,
-  AverageTrainingTimeReportResponse
+  AverageTrainingTimeReportResponse,
+  ThematicTrainingReportResponse,
 } from "../models/Report";
 
 interface ResponseModalState {
@@ -273,6 +275,7 @@ export function ReportPage() {
   const [trainingHoursReport, setTrainingHoursReport] = useState<TrainingHoursReportResponse | null>(null);
   const [responseModal, setResponseModal] = useState<ResponseModalState>(emptyResponseModal);
   const [generalReport, setGeneralReport] = useState<GeneralReportResponse | null>(null);
+  const [thematicTrainingReport, setThematicTrainingReport] = useState<ThematicTrainingReportResponse | null>(null);
   const [loadingAverageTrainingTime, setLoadingAverageTrainingTime] = useState(false);
   const [sstReport, setSstReport] = useState<SstTrainingReportResponse | null>(null);
   const [report, setReport] = useState<TrainingReportResponse | null>(null);
@@ -314,7 +317,7 @@ export function ReportPage() {
 
       setLoading(true);
 
-      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, transversalTrainingResponse, generalResponse] = await Promise.all([
+      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, transversalTrainingResponse, generalResponse, thematicTrainingResponse] = await Promise.all([
         reportService.getTrainingReport({
           dateFrom,
           dateTo,
@@ -342,6 +345,10 @@ export function ReportPage() {
         reportService.getGeneralReport({
           dateFrom,
           dateTo
+        }),
+        reportService.getThematicTrainingReport({
+          dateFrom,
+          dateTo,
         }),
       ]);
 
@@ -380,6 +387,11 @@ export function ReportPage() {
         return;
       }
 
+      if (!thematicTrainingResponse.isSuccess || !thematicTrainingResponse.result) {
+        showResponseModal("error", "Error", thematicTrainingResponse.Message || "No se pudieron cargar los reportes temáticos.");
+        return;
+      }
+
       setReport(trainingResponse.result);
       setSstReport(sstTrainingResponse.result);
       setTrainingHoursReport(trainingHoursResponse.result);
@@ -387,6 +399,7 @@ export function ReportPage() {
       setAdministrativeInductionReport(administrativeInductionResponse.result);
       setTransversalTrainingReport(transversalTrainingResponse.result);
       setGeneralReport(generalResponse.result);
+      setThematicTrainingReport(thematicTrainingResponse.result);
     } catch (err) {
       showResponseModal("error", "Error", getErrorMessage(err));
     } finally {
@@ -403,7 +416,7 @@ export function ReportPage() {
     try {
       setLoading(true);
 
-      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, transversalTrainingResponse, generalResponse] = await Promise.all([
+      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, transversalTrainingResponse, generalResponse, thematicTrainingResponse] = await Promise.all([
         reportService.getTrainingReport({
           dateFrom: currentMonthRange.dateFrom,
           dateTo: currentMonthRange.dateTo,
@@ -432,6 +445,10 @@ export function ReportPage() {
           dateFrom: currentMonthRange.dateFrom,
           dateTo: currentMonthRange.dateTo,
         }),
+        reportService.getThematicTrainingReport({
+          dateFrom: currentMonthRange.dateFrom,
+          dateTo: currentMonthRange.dateTo,
+        }),
       ]);
 
       setReport(trainingResponse.isSuccess ? trainingResponse.result ?? null : null);
@@ -441,6 +458,7 @@ export function ReportPage() {
       setAdministrativeInductionReport(administrativeInductionResponse.isSuccess ? administrativeInductionResponse.result ?? null : null);
       setTransversalTrainingReport(transversalTrainingResponse.isSuccess ? transversalTrainingResponse.result ?? null : null);
       setGeneralReport(generalResponse.isSuccess ? generalResponse.result ?? null : null);
+      setThematicTrainingReport(thematicTrainingResponse.isSuccess ? thematicTrainingResponse.result ?? null : null);
     } catch (err) {
       showResponseModal("error", "Error", getErrorMessage(err));
     } finally {
@@ -541,6 +559,7 @@ export function ReportPage() {
       administrativeInductionReport ||
       transversalTrainingReport ||
       generalReport ||
+      thematicTrainingReport ||
       averageTrainingTimeReport ||
       collaboratorReport;
 
@@ -690,6 +709,60 @@ export function ReportPage() {
       });
     }
 
+    (thematicTrainingReport?.reports ?? []).forEach((thematicReport) => {
+      addSection(`CAPACITACIONES ${thematicReport.name.toUpperCase()}`);
+      addHeader(["Indicador", "Valor"]);
+      addRow([
+        `Colaboradores internos capacitados en ${thematicReport.name}`,
+        formatNumber(thematicReport.summary.totalInternalTrainedPeople),
+      ]);
+      addDurationRow([
+        `Tiempo total de capacitación ${thematicReport.name}`,
+        formatNumber(thematicReport.summary.totalTrainingHours),
+      ], 1);
+      addDurationRow([
+        `Tiempo promedio de capacitación ${thematicReport.name} por colaborador interno`,
+        formatNumber(
+          thematicReport.summary.averageTrainingHoursPerInternalCollaborator
+        ),
+      ], 1);
+
+      addBlankRow();
+      addHeader(["Documento", "Colaborador", "Centro de soluciones", "Tiempo"]);
+      if (thematicReport.byCollaborator.length === 0) {
+        addRow(["No hay datos", "", "", 0]);
+      } else {
+        thematicReport.byCollaborator.forEach((collaborator) => {
+          addDurationRow([
+            collaborator.documentNumberAttendancePerson,
+            collaborator.fullNameAttendancePerson,
+            collaborator.nameSolutionCenter,
+            formatNumber(collaborator.totalTrainingHours),
+          ], 3);
+        });
+      }
+
+      if (["PRODUCTO", "SER"].includes(thematicReport.key)) {
+        addBlankRow();
+        addHeader([
+          thematicReport.key === "PRODUCTO" ? "Línea de producto" : "Temario",
+          "Capacitaciones",
+          "Personas capacitadas",
+        ]);
+        if (thematicReport.byTopic.length === 0) {
+          addRow(["No hay datos", 0, 0]);
+        } else {
+          thematicReport.byTopic.forEach((topic) => {
+            addRow([
+              topic.nameEventTopic,
+              formatNumber(topic.totalTrainings),
+              formatNumber(topic.totalTrainedPeople),
+            ]);
+          });
+        }
+      }
+    });
+
     addSection("CAPACITACIONES SST");
     addHeader(["Indicador", "Valor"]);
     addRow([
@@ -728,7 +801,7 @@ export function ReportPage() {
     addSection("TIEMPO DE CAPACITACIÓN");
     addHeader(["Indicador", "Valor"]);
     addDurationRow([
-      "Tiempo total de capacitación",
+      "Tiempo total de capacitaciones",
       formatNumber(trainingHoursReport?.totalTrainingHours),
     ], 1);
     addDurationRow([
@@ -744,11 +817,11 @@ export function ReportPage() {
       formatNumber(trainingHoursReport?.totalPersonalTrainingHours),
     ], 1);
     addDurationRow([
-      "Tiempo total: Ser",
+      "Tiempo de capacitaciones del SER",
       formatNumber(trainingHoursReport?.totalSerTrainingHours),
     ], 1);
     addDurationRow([
-      "Tiempo total: Hacer",
+      "Tiempo de capacitaciones del HACER",
       formatNumber(trainingHoursReport?.totalHacerTrainingHours),
     ], 1);
     addDurationRow([
@@ -1252,7 +1325,11 @@ export function ReportPage() {
     sstReport?.summary.totalInternalSstTrainedPeople
       ? Number(
           (
-            sstReport.summary.totalSstTrainingHours /
+            sstReport.byCollaborator.reduce(
+              (total, collaborator) =>
+                total + collaborator.totalSstTrainingHours,
+              0
+            ) /
             sstReport.summary.totalInternalSstTrainedPeople
           ).toFixed(2)
         )
@@ -1569,9 +1646,19 @@ export function ReportPage() {
             </Typography>
             <DonutChart data={competencyChartData} centerLabel="Asistencias" />
           </Paper>
+          {(thematicTrainingReport?.reports ?? []).map((thematicReport) => (
+            <ThematicTrainingSectionPanel
+              key={thematicReport.key}
+              report={thematicReport}
+              formatDuration={formatTrainingDuration}
+            />
+          ))}
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 2 }}>
             <Typography sx={{ color: "#4B2E1F", fontSize: 22, fontWeight: 800 }}>
               Capacitaciones SST
+            </Typography>
+            <Typography sx={{ color: "#7A6252", fontSize: 13 }}>
+              El tiempo total acumula la asistencia del personal interno y externo.
             </Typography>
           </Box>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr 1fr", }, gap: 2, }}>
@@ -1642,19 +1729,20 @@ export function ReportPage() {
                   Tiempo SST por colaborador interno
                 </Typography>
               </Box>
-              <Table size="small">
+              <Box sx={{ maxHeight: 360, overflow: "auto" }}>
+              <Table stickyHeader size="small" sx={{ minWidth: 700 }}>
                 <TableHead>
-                  <TableRow sx={{ bgcolor: "#F7E8D8" }}>
-                    <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>
+                  <TableRow>
+                    <TableCell sx={{ color: "#4B2E1F", fontWeight: 700, bgcolor: "#F7E8D8" }}>
                       Documento
                     </TableCell>
-                    <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>
+                    <TableCell sx={{ color: "#4B2E1F", fontWeight: 700, bgcolor: "#F7E8D8" }}>
                       Colaborador
                     </TableCell>
-                    <TableCell sx={{ color: "#4B2E1F", fontWeight: 700 }}>
+                    <TableCell sx={{ color: "#4B2E1F", fontWeight: 700, bgcolor: "#F7E8D8" }}>
                       Centro
                     </TableCell>
-                    <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700 }}>
+                    <TableCell align="right" sx={{ color: "#4B2E1F", fontWeight: 700, bgcolor: "#F7E8D8" }}>
                       Tiempo
                     </TableCell>
                   </TableRow>
@@ -1680,6 +1768,7 @@ export function ReportPage() {
                   )}
                 </TableBody>
               </Table>
+              </Box>
             </Paper>
           </Box>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 2 }}>
@@ -1691,7 +1780,7 @@ export function ReportPage() {
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Tiempo total de capacitación
+                  Tiempo total de capacitaciones
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
                   {formatTrainingDuration(
@@ -1739,7 +1828,7 @@ export function ReportPage() {
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Tiempo programa: Ser
+                  Tiempo de capacitaciones del SER
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
                   {formatTrainingDuration(
@@ -1751,7 +1840,7 @@ export function ReportPage() {
             <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8" }}>
               <CardContent>
                 <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                  Tiempo programa: Hacer
+                  Tiempo de capacitaciones del HACER
                 </Typography>
                 <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
                   {formatTrainingDuration(
