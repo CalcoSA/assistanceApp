@@ -29,6 +29,10 @@ class IReportApplication(ABC):
         pass
 
     @abstractmethod
+    def getThematicTrainingReport(self, dateFrom: Optional[date], dateTo: Optional[date],):
+        pass
+
+    @abstractmethod
     def getGeneralReport(self, dateFrom: Optional[date], dateTo: Optional[date],):
         pass
 

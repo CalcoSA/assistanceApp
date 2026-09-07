@@ -20,11 +20,24 @@ from app.domain.dtos.ReportDto import (
     AdministrativeInductionReportResponseDto,
     TransversalTrainingByCollaboratorDto,
     TransversalTrainingReportResponseDto,
+    TrainingTopicIndicatorDto,
+    ThematicTrainingByCollaboratorDto,
+    ThematicTrainingReportResponseDto,
+    ThematicTrainingSectionDto,
+    ThematicTrainingSummaryDto,
     GeneralReportResponseDto,
     AverageTrainingTimeReportResponseDto
 )
 
 class ReportApplication(IReportApplication):
+
+    THEMATIC_TRAININGS = (
+        ("INOCUIDAD", "Inocuidad"),
+        ("SERVICIO", "Servicio"),
+        ("PRODUCTO", "Producto"),
+        ("INDUCCION", "Inducción"),
+        ("SER", "SER"),
+    )
 
     def __init__(self, reportRepository: IReportRepository):
         self.reportRepository = reportRepository
@@ -164,13 +177,105 @@ class ReportApplication(IReportApplication):
                 for item in byCollaborator
             ],
         )
+
+    def getThematicTrainingReport(
+        self,
+        dateFrom: Optional[date],
+        dateTo: Optional[date],
+    ):
+        if dateFrom and dateTo and dateFrom > dateTo:
+            raise ValueError("La fecha inicial no puede ser mayor a la fecha final.")
+
+        reports = []
+
+        for themeKey, themeName in self.THEMATIC_TRAININGS:
+            summary = self.reportRepository.getThematicTrainingSummary(
+                themeKey,
+                dateFrom,
+                dateTo,
+            )
+            byCollaborator = (
+                self.reportRepository.getThematicTrainingByCollaborator(
+                    themeKey,
+                    dateFrom,
+                    dateTo,
+                )
+            )
+            byTopic = self.reportRepository.getThematicTrainingByTopic(
+                themeKey,
+                dateFrom,
+                dateTo,
+            )
+            totalInternalPeople = int(
+                summary["totalInternalTrainedPeople"] or 0
+            )
+            totalTrainingHours = round(
+                float(summary["totalTrainingHours"] or 0),
+                2,
+            )
+            totalInternalTrainingHours = round(
+                float(summary["totalInternalTrainingHours"] or 0),
+                2,
+            )
+            averageTrainingHours = (
+                totalInternalTrainingHours / totalInternalPeople
+                if totalInternalPeople > 0
+                else 0
+            )
+
+            reports.append(
+                ThematicTrainingSectionDto(
+                    key=themeKey,
+                    name=themeName,
+                    summary=ThematicTrainingSummaryDto(
+                        totalInternalTrainedPeople=totalInternalPeople,
+                        totalTrainingHours=totalTrainingHours,
+                        averageTrainingHoursPerInternalCollaborator=round(
+                            averageTrainingHours,
+                            2,
+                        ),
+                    ),
+                    byCollaborator=[
+                        ThematicTrainingByCollaboratorDto(
+                            documentNumberAttendancePerson=(
+                                item.documentNumberAttendancePerson
+                            ),
+                            fullNameAttendancePerson=(
+                                item.fullNameAttendancePerson
+                            ),
+                            nameSolutionCenter=(
+                                item.nameSolutionCenter
+                                or "SIN CENTRO DE SOLUCIONES"
+                            ),
+                            totalTrainingHours=round(
+                                float(item.totalTrainingHours or 0),
+                                2,
+                            ),
+                        )
+                        for item in byCollaborator
+                    ],
+                    byTopic=[
+                        TrainingTopicIndicatorDto(
+                            nameEventTopic=(
+                                item.nameEventTopic or "SIN TEMARIO"
+                            ),
+                            totalTrainings=int(item.totalTrainings or 0),
+                            totalTrainedPeople=int(
+                                item.totalTrainedPeople or 0
+                            ),
+                        )
+                        for item in byTopic
+                    ],
+                )
+            )
+
+        return ThematicTrainingReportResponseDto(reports=reports)
     
     def getGeneralReport(self, dateFrom: Optional[date], dateTo: Optional[date],):
         if dateFrom and dateTo and dateFrom > dateTo:
             raise ValueError("La fecha inicial no puede ser mayor a la fecha final.")
 
         summary = self.reportRepository.getGeneralSummary(dateFrom, dateTo)
-
         return GeneralReportResponseDto(
             topTrainingSolutionCenterName=summary["topTrainingSolutionCenterName"],
             topTrainingSolutionCenterTotal=summary["topTrainingSolutionCenterTotal"],
@@ -198,7 +303,7 @@ class ReportApplication(IReportApplication):
         if dateFrom and dateTo and dateFrom > dateTo:
             raise ValueError("La fecha inicial no puede ser mayor a la fecha final.")
 
-        normalizedSearch = search.strip()
+        normalizedSearch = " ".join(search.strip().split())
 
         if not normalizedSearch:
             raise ValueError("Debe ingresar el nombre o la cédula del colaborador.")
@@ -211,9 +316,10 @@ class ReportApplication(IReportApplication):
         collaborators = {}
 
         for item in historyRows:
+            attendancePersonId = item.IdAttendancePerson
             documentNumber = item.documentNumberAttendancePerson
             collaborator = collaborators.setdefault(
-                documentNumber,
+                attendancePersonId,
                 {
                     "documentNumberAttendancePerson": documentNumber,
                     "fullNameAttendancePerson": item.fullNameAttendancePerson,
@@ -222,8 +328,14 @@ class ReportApplication(IReportApplication):
                     "totalTrainingHours": 0.0,
                     "byTrainingSolutionCenter": {},
                     "trainings": [],
+                    "seenEventIds": set(),
                 },
             )
+
+            if item.IdEvent in collaborator["seenEventIds"]:
+                continue
+
+            collaborator["seenEventIds"].add(item.IdEvent)
             trainingHours = float(item.trainingHours or 0)
             trainingSolutionCenterName = item.trainingSolutionCenterName or "SIN CENTRO DE SOLUCIONES"
 
