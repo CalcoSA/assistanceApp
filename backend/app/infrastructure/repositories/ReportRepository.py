@@ -4,6 +4,7 @@ from app.domain.entities.AttendancePerson import AttendancePerson
 from app.domain.entities.SolutionCenter import SolutionCenter
 from app.domain.entities.PersonnelType import PersonnelType
 from app.domain.entities.EventCategory import EventCategory
+from app.domain.entities.EventTopic import EventTopic
 from app.domain.entities.AssistanceReason import AssistanceReason
 from app.domain.entities.EventCompetency import EventCompetency
 from app.domain.entities.Competency import Competency
@@ -25,7 +26,16 @@ class ReportRepository(IReportRepository):
     PROGRAM_HACER_NAME = "hacer"
     ADMINISTRATIVE_PERSONNEL_TYPE_NAME = "administrativo"
     QUALITY_SOLUTION_CENTER_NAME = "calidad"
+    INDUCTION_ASSISTANCE_REASON_NAME = "inducción"
     TRANSVERSAL_ASSISTANCE_REASON_NAME = "transversales"
+    SERVICE_COMPETENCY_NAME = "actitud de servicio"
+    THEMATIC_TRAINING_KEYS = {
+        "INOCUIDAD",
+        "SERVICIO",
+        "PRODUCTO",
+        "INDUCCION",
+        "SER",
+    }
 
     def __init__(self, db: Session):
         self.db = db
@@ -168,108 +178,320 @@ class ReportRepository(IReportRepository):
     def _eventDurationHoursExpression(self):
         return (func.time_to_sec(func.timediff(Event.endTimeEvent, Event.startTimeEvent)) / 3600)
 
-    def getSstTrainingSummary(self, dateFrom: Optional[date], dateTo: Optional[date],):
-        eventSolutionCenter = SolutionCenter.__table__.alias("eventSolutionCenter")
-        personSolutionCenter = SolutionCenter.__table__.alias("personSolutionCenter")
+    def _getDistinctAttendancePairsSubquery(self, eventIdsQuery, aliasName: str):
+        return (
+            self.db.query(
+                Attendance.IdEvent.label("IdEvent"),
+                Attendance.IdAttendancePerson.label("IdAttendancePerson"),
+            )
+            .filter(Attendance.IdEvent.in_(eventIdsQuery))
+            .distinct()
+            .subquery(aliasName)
+        )
 
-        internalPeopleQuery = (
+    def _getAttendanceHoursSummary(self, eventIdsQuery, aliasPrefix: str):
+        attendancePairs = self._getDistinctAttendancePairsSubquery(
+            eventIdsQuery,
+            f"{aliasPrefix}AttendancePairs",
+        )
+        personSolutionCenter = SolutionCenter.__table__.alias(
+            f"{aliasPrefix}PersonSolutionCenter"
+        )
+        internalPersonCondition = (
+            func.lower(func.trim(personSolutionCenter.c.nameSolutionCenter))
+            != self.EXTERNAL_SOLUTION_CENTER_NAME
+        )
+        durationHours = self._eventDurationHoursExpression()
+
+        result = (
             self.db.query(
                 func.count(
-                    distinct(AttendancePerson.IdAttendancePerson)
-                ).label("totalInternalSstTrainedPeople")
+                    distinct(
+                        case(
+                            (
+                                internalPersonCondition,
+                                AttendancePerson.IdAttendancePerson,
+                            )
+                        )
+                    )
+                ).label("totalInternalTrainedPeople"),
+                func.coalesce(
+                    func.sum(durationHours),
+                    0,
+                ).label("totalTrainingHours"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (internalPersonCondition, durationHours),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("totalInternalTrainingHours"),
             )
-            .join(Attendance, Attendance.IdAttendancePerson == AttendancePerson.IdAttendancePerson)
-            .join(Event, Event.IdEvent == Attendance.IdEvent)
-            .outerjoin(
-                eventSolutionCenter,
-                eventSolutionCenter.c.IdSolutionCenter == Event.IdSolutionCenter
+            .select_from(attendancePairs)
+            .join(Event, Event.IdEvent == attendancePairs.c.IdEvent)
+            .join(
+                AttendancePerson,
+                AttendancePerson.IdAttendancePerson
+                == attendancePairs.c.IdAttendancePerson,
             )
             .outerjoin(
                 personSolutionCenter,
-                personSolutionCenter.c.IdSolutionCenter == AttendancePerson.IdSolutionCenter
+                personSolutionCenter.c.IdSolutionCenter
+                == AttendancePerson.IdSolutionCenter,
             )
-            .filter(
-                func.lower(func.trim(eventSolutionCenter.c.nameSolutionCenter)) == self.SST_SOLUTION_CENTER_NAME
-            )
-            .filter(
-                func.lower(func.trim(personSolutionCenter.c.nameSolutionCenter)) != self.EXTERNAL_SOLUTION_CENTER_NAME
-            )
+            .first()
         )
-
-        internalPeopleQuery = self._applyDateFilters(internalPeopleQuery, dateFrom, dateTo)
-
-        totalInternalPeople = internalPeopleQuery.scalar() or 0
-
-        hoursQuery = (
-            self.db.query(
-                func.coalesce(
-                    func.sum(self._eventDurationHoursExpression()),
-                    0
-                ).label("totalSstTrainingHours")
-            )
-            .outerjoin(
-                eventSolutionCenter,
-                eventSolutionCenter.c.IdSolutionCenter == Event.IdSolutionCenter
-            )
-            .filter(
-                func.lower(func.trim(eventSolutionCenter.c.nameSolutionCenter)) == self.SST_SOLUTION_CENTER_NAME
-            )
-        )
-
-        hoursQuery = self._applyDateFilters(hoursQuery, dateFrom, dateTo)
-
-        totalHours = hoursQuery.scalar() or 0
 
         return {
-            "totalInternalSstTrainedPeople": int(totalInternalPeople),
-            "totalSstTrainingHours": round(float(totalHours), 2),
+            "totalInternalTrainedPeople": int(
+                result.totalInternalTrainedPeople or 0
+            ),
+            "totalTrainingHours": round(
+                float(result.totalTrainingHours or 0),
+                2,
+            ),
+            "totalInternalTrainingHours": round(
+                float(result.totalInternalTrainingHours or 0),
+                2,
+            ),
         }
 
-    def getSstTrainingByCollaborator(self, dateFrom: Optional[date], dateTo: Optional[date],):
-        eventSolutionCenter = SolutionCenter.__table__.alias("eventSolutionCenter")
-        personSolutionCenter = SolutionCenter.__table__.alias("personSolutionCenter")
+    def _getInternalTrainingByCollaborator(
+        self,
+        eventIdsQuery,
+        totalHoursLabel: str,
+        aliasPrefix: str,
+    ):
+        attendancePairs = self._getDistinctAttendancePairsSubquery(
+            eventIdsQuery,
+            f"{aliasPrefix}AttendancePairs",
+        )
+        personSolutionCenter = SolutionCenter.__table__.alias(
+            f"{aliasPrefix}PersonSolutionCenter"
+        )
 
-        query = (
+        return (
             self.db.query(
-                AttendancePerson.documentNumberAttendancePerson.label("documentNumberAttendancePerson"),
-                AttendancePerson.fullNameAttendancePerson.label("fullNameAttendancePerson"),
-                personSolutionCenter.c.nameSolutionCenter.label("nameSolutionCenter"),
+                AttendancePerson.documentNumberAttendancePerson.label(
+                    "documentNumberAttendancePerson"
+                ),
+                AttendancePerson.fullNameAttendancePerson.label(
+                    "fullNameAttendancePerson"
+                ),
+                personSolutionCenter.c.nameSolutionCenter.label(
+                    "nameSolutionCenter"
+                ),
                 func.coalesce(
                     func.sum(self._eventDurationHoursExpression()),
-                    0
-                ).label("totalSstTrainingHours"),
+                    0,
+                ).label(totalHoursLabel),
             )
-            .join(Attendance, Attendance.IdAttendancePerson == AttendancePerson.IdAttendancePerson)
-            .join(Event, Event.IdEvent == Attendance.IdEvent)
-            .outerjoin(
-                eventSolutionCenter,
-                eventSolutionCenter.c.IdSolutionCenter == Event.IdSolutionCenter
+            .select_from(attendancePairs)
+            .join(Event, Event.IdEvent == attendancePairs.c.IdEvent)
+            .join(
+                AttendancePerson,
+                AttendancePerson.IdAttendancePerson
+                == attendancePairs.c.IdAttendancePerson,
             )
             .outerjoin(
                 personSolutionCenter,
-                personSolutionCenter.c.IdSolutionCenter == AttendancePerson.IdSolutionCenter
+                personSolutionCenter.c.IdSolutionCenter
+                == AttendancePerson.IdSolutionCenter,
             )
             .filter(
-                func.lower(func.trim(eventSolutionCenter.c.nameSolutionCenter)) == self.SST_SOLUTION_CENTER_NAME
+                func.lower(func.trim(personSolutionCenter.c.nameSolutionCenter))
+                != self.EXTERNAL_SOLUTION_CENTER_NAME
             )
-            .filter(
-                func.lower(func.trim(personSolutionCenter.c.nameSolutionCenter)) != self.EXTERNAL_SOLUTION_CENTER_NAME
-            )
-        )
-
-        query = self._applyDateFilters(query, dateFrom, dateTo)
-
-        return (
-            query
             .group_by(
+                AttendancePerson.IdAttendancePerson,
                 AttendancePerson.documentNumberAttendancePerson,
                 AttendancePerson.fullNameAttendancePerson,
                 personSolutionCenter.c.nameSolutionCenter,
             )
-            .order_by(func.sum(self._eventDurationHoursExpression()).desc())
+            .order_by(
+                func.sum(self._eventDurationHoursExpression()).desc(),
+                AttendancePerson.fullNameAttendancePerson.asc(),
+            )
             .all()
         )
-    
+
+    def _getSstEventIdsQuery(
+        self,
+        dateFrom: Optional[date],
+        dateTo: Optional[date],
+    ):
+        eventSolutionCenter = SolutionCenter.__table__.alias(
+            "sstEventSolutionCenter"
+        )
+        query = (
+            self.db.query(Event.IdEvent)
+            .select_from(Event)
+            .join(
+                eventSolutionCenter,
+                eventSolutionCenter.c.IdSolutionCenter
+                == Event.IdSolutionCenter,
+            )
+            .filter(
+                func.lower(func.trim(eventSolutionCenter.c.nameSolutionCenter))
+                == self.SST_SOLUTION_CENTER_NAME
+            )
+        )
+
+        return self._applyDateFilters(query, dateFrom, dateTo).distinct()
+
+    def getSstTrainingSummary(self, dateFrom: Optional[date], dateTo: Optional[date],):
+        summary = self._getAttendanceHoursSummary(
+            self._getSstEventIdsQuery(dateFrom, dateTo),
+            "sstSummary",
+        )
+
+        return {
+            "totalInternalSstTrainedPeople": summary[
+                "totalInternalTrainedPeople"
+            ],
+            "totalSstTrainingHours": summary["totalTrainingHours"],
+        }
+
+    def getSstTrainingByCollaborator(self, dateFrom: Optional[date], dateTo: Optional[date],):
+        return self._getInternalTrainingByCollaborator(
+            self._getSstEventIdsQuery(dateFrom, dateTo),
+            "totalSstTrainingHours",
+            "sstCollaborator",
+        )
+
+    def _getThematicEventIdsQuery(
+        self,
+        themeKey: str,
+        dateFrom: Optional[date],
+        dateTo: Optional[date],
+    ):
+        normalizedThemeKey = themeKey.strip().upper()
+
+        if normalizedThemeKey not in self.THEMATIC_TRAINING_KEYS:
+            raise ValueError("El tipo de reporte temático no es válido.")
+
+        query = self.db.query(Event.IdEvent).select_from(Event)
+
+        if normalizedThemeKey == "INOCUIDAD":
+            eventSolutionCenter = SolutionCenter.__table__.alias(
+                "thematicEventSolutionCenter"
+            )
+            query = query.join(
+                eventSolutionCenter,
+                eventSolutionCenter.c.IdSolutionCenter == Event.IdSolutionCenter,
+            ).filter(
+                func.lower(func.trim(eventSolutionCenter.c.nameSolutionCenter))
+                == self.QUALITY_SOLUTION_CENTER_NAME
+            )
+        elif normalizedThemeKey == "SERVICIO":
+            query = (
+                query
+                .join(EventCompetency, EventCompetency.IdEvent == Event.IdEvent)
+                .join(
+                    Competency,
+                    Competency.IdCompetency == EventCompetency.IdCompetency,
+                )
+                .filter(
+                    func.lower(func.trim(Competency.nameCompetency))
+                    == self.SERVICE_COMPETENCY_NAME
+                )
+            )
+        elif normalizedThemeKey in {"PRODUCTO", "SER"}:
+            programName = (
+                self.PROGRAM_HACER_NAME
+                if normalizedThemeKey == "PRODUCTO"
+                else self.PROGRAM_SER_NAME
+            )
+            query = query.join(
+                SpecificTrainingProgram,
+                SpecificTrainingProgram.IdSpecificTrainingProgram
+                == Event.IdSpecificTrainingProgram,
+            ).filter(
+                func.lower(
+                    func.trim(
+                        SpecificTrainingProgram.nameSpecificTrainingProgram
+                    )
+                )
+                == programName
+            )
+        else:
+            query = query.join(
+                AssistanceReason,
+                AssistanceReason.IdAssistanceReason == Event.IdAssistanceReason,
+            ).filter(
+                func.lower(func.trim(AssistanceReason.nameAssistanceReason))
+                == self.INDUCTION_ASSISTANCE_REASON_NAME
+            )
+
+        return self._applyDateFilters(query, dateFrom, dateTo).distinct()
+
+    def getThematicTrainingSummary(
+        self,
+        themeKey: str,
+        dateFrom: Optional[date],
+        dateTo: Optional[date],
+    ):
+        return self._getAttendanceHoursSummary(
+            self._getThematicEventIdsQuery(themeKey, dateFrom, dateTo),
+            f"thematic{themeKey.strip().title()}Summary",
+        )
+
+    def getThematicTrainingByCollaborator(
+        self,
+        themeKey: str,
+        dateFrom: Optional[date],
+        dateTo: Optional[date],
+    ):
+        return self._getInternalTrainingByCollaborator(
+            self._getThematicEventIdsQuery(themeKey, dateFrom, dateTo),
+            "totalTrainingHours",
+            f"thematic{themeKey.strip().title()}Collaborator",
+        )
+
+    def getThematicTrainingByTopic(
+        self,
+        themeKey: str,
+        dateFrom: Optional[date],
+        dateTo: Optional[date],
+    ):
+        normalizedThemeKey = themeKey.strip().upper()
+
+        if normalizedThemeKey not in {"PRODUCTO", "SER"}:
+            return []
+
+        eventIdsQuery = self._getThematicEventIdsQuery(
+            normalizedThemeKey,
+            dateFrom,
+            dateTo,
+        )
+
+        return (
+            self.db.query(
+                EventTopic.nameEventTopic.label("nameEventTopic"),
+                func.count(distinct(Event.IdEvent)).label("totalTrainings"),
+                func.count(
+                    distinct(AttendancePerson.IdAttendancePerson)
+                ).label("totalTrainedPeople"),
+            )
+            .select_from(EventTopic)
+            .join(Event, Event.IdEvent == EventTopic.IdEvent)
+            .outerjoin(Attendance, Attendance.IdEvent == Event.IdEvent)
+            .outerjoin(
+                AttendancePerson,
+                AttendancePerson.IdAttendancePerson
+                == Attendance.IdAttendancePerson,
+            )
+            .filter(Event.IdEvent.in_(eventIdsQuery))
+            .group_by(EventTopic.nameEventTopic)
+            .order_by(
+                func.count(distinct(Event.IdEvent)).desc(),
+                EventTopic.nameEventTopic.asc(),
+            )
+            .all()
+        )
+
     def getTrainingHoursSummary(self, dateFrom: Optional[date], dateTo: Optional[date],):
         durationHours = self._eventDurationHoursExpression()
         personSolutionCenter = SolutionCenter.__table__.alias("personSolutionCenter")
@@ -735,11 +957,25 @@ class ReportRepository(IReportRepository):
     def getCollaboratorTrainingHistory(self, search: str, dateFrom: Optional[date], dateTo: Optional[date],):
         eventSolutionCenter = SolutionCenter.__table__.alias("historyEventSolutionCenter")
         personSolutionCenter = SolutionCenter.__table__.alias("historyPersonSolutionCenter")
-        normalizedSearch = search.strip().lower()
-        searchPattern = f"%{normalizedSearch}%"
+        normalizedSearch = " ".join(search.strip().lower().split())
+        searchTokens = normalizedSearch.split()
+        normalizedName = func.lower(
+            func.trim(AttendancePerson.fullNameAttendancePerson)
+        )
+        normalizedDocument = func.lower(
+            func.trim(AttendancePerson.documentNumberAttendancePerson)
+        )
+        searchConditions = [
+            or_(
+                normalizedName.like(f"%{token}%"),
+                normalizedDocument.like(f"%{token}%"),
+            )
+            for token in searchTokens
+        ]
 
         query = (
             self.db.query(
+                AttendancePerson.IdAttendancePerson.label("IdAttendancePerson"),
                 AttendancePerson.documentNumberAttendancePerson.label("documentNumberAttendancePerson"),
                 AttendancePerson.fullNameAttendancePerson.label("fullNameAttendancePerson"),
                 personSolutionCenter.c.nameSolutionCenter.label("personSolutionCenterName"),
@@ -763,12 +999,8 @@ class ReportRepository(IReportRepository):
                 personSolutionCenter,
                 personSolutionCenter.c.IdSolutionCenter == AttendancePerson.IdSolutionCenter,
             )
-            .filter(
-                or_(
-                    func.lower(AttendancePerson.fullNameAttendancePerson).like(searchPattern),
-                    func.lower(AttendancePerson.documentNumberAttendancePerson).like(searchPattern),
-                )
-            )
+            .filter(and_(*searchConditions))
+            .distinct()
         )
 
         query = self._applyDateFilters(query, dateFrom, dateTo)

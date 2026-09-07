@@ -73,6 +73,32 @@ class TransversalTrainingReportResponseDto(BaseModel):
     totalTransversalTrainingPeople: int
     byCollaborator: List[TransversalTrainingByCollaboratorDto]
 
+class TrainingTopicIndicatorDto(BaseModel):
+    nameEventTopic: str
+    totalTrainings: int
+    totalTrainedPeople: int
+
+class ThematicTrainingSummaryDto(BaseModel):
+    totalInternalTrainedPeople: int
+    totalTrainingHours: float
+    averageTrainingHoursPerInternalCollaborator: float
+
+class ThematicTrainingByCollaboratorDto(BaseModel):
+    documentNumberAttendancePerson: str
+    fullNameAttendancePerson: str
+    nameSolutionCenter: str
+    totalTrainingHours: float
+
+class ThematicTrainingSectionDto(BaseModel):
+    key: str
+    name: str
+    summary: ThematicTrainingSummaryDto
+    byCollaborator: List[ThematicTrainingByCollaboratorDto]
+    byTopic: List[TrainingTopicIndicatorDto] = Field(default_factory=list)
+
+class ThematicTrainingReportResponseDto(BaseModel):
+    reports: List[ThematicTrainingSectionDto]
+
 class GeneralReportResponseDto(BaseModel):
     topTrainingSolutionCenterName: str
     topTrainingSolutionCenterTotal: int

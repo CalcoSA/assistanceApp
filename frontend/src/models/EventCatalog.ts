@@ -18,6 +18,12 @@ export interface Competency {
     nameCompetency: string;
 }
 
+export interface CompetencyCreate {
+    nameCompetency: string;
+}
+
+export type CompetencyUpdate = CompetencyCreate;
+
 export interface AssistanceReason {
     IdAssistanceReason: number;
     nameAssistanceReason: string;

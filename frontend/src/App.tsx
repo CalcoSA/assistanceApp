@@ -8,6 +8,7 @@ import { RequireAuth } from "./components/RequireAuth";
 import { AttendancePage } from "./pages/AttendancePage";
 import { AppLayout } from "./components/AppLayout";
 import { ParameterPage } from "./pages/ParameterPage";
+import { CompetencyPage } from "./pages/CompetencyPage";
 import { ReportPage } from "./pages/ReportPage";
 import { LoginPage } from "./pages/LoginPage";
 import { EventPage } from "./pages/EventPage";
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/maestros/roles" element={ <RequirePermission path="/maestros/roles"> <RolePage /> </RequirePermission> } />
             <Route path="/maestros/usuarios" element={ <RequirePermission path="/maestros/usuarios"> <ApplicationUserPage /> </RequirePermission> } />
             <Route path="/maestros/parametros" element={ <RequirePermission path="/maestros/parametros"> <ParameterPage /> </RequirePermission> } />
+            <Route path="/maestros/competencias" element={ <RequirePermission path="/maestros/competencias"> <CompetencyPage /> </RequirePermission> } />
             <Route path="/eventos" element={ <RequirePermission path="/eventos"> <EventPage /> </RequirePermission> } />
             <Route path="/reportes" element={ <RequirePermission path="/reportes"> <ReportPage /> </RequirePermission> } />
             <Route path="*" element={<Navigate to="/" replace />} />

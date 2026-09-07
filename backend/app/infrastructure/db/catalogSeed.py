@@ -12,6 +12,8 @@ import unicodedata
 REQUIRED_ASSISTANCE_REASONS = ("REINDUCCIÓN", "TRANSVERSALES")
 PARAMETERS_MENU_PATH = "/maestros/parametros"
 PARAMETERS_MENU_NAME = "Parámetros"
+COMPETENCIES_MENU_PATH = "/maestros/competencias"
+COMPETENCIES_MENU_NAME = "Competencias"
 ADMIN_ROLE_NAMES = {"administrador", "superadministrador", "superadmin"}
 
 
@@ -110,6 +112,35 @@ def seedRequiredCatalogs() -> None:
                 parametersMenuOption.orderMenuOption = parametersMenuOrder
                 hasChanges = True
 
+        competenciesMenuOption = (
+            db.query(MenuOption)
+            .filter(MenuOption.pathMenuOption == COMPETENCIES_MENU_PATH)
+            .first()
+        )
+        competenciesMenuOrder = parametersMenuOrder + 1
+
+        if not competenciesMenuOption:
+            competenciesMenuOption = MenuOption(
+                nameMenuOption=COMPETENCIES_MENU_NAME,
+                pathMenuOption=COMPETENCIES_MENU_PATH,
+                iconMenuOption="PsychologyOutlined",
+                orderMenuOption=competenciesMenuOrder,
+                statusMenuOption=True,
+            )
+            db.add(competenciesMenuOption)
+            db.flush()
+            hasChanges = True
+        else:
+            if competenciesMenuOption.nameMenuOption != COMPETENCIES_MENU_NAME:
+                competenciesMenuOption.nameMenuOption = COMPETENCIES_MENU_NAME
+                hasChanges = True
+            if not competenciesMenuOption.statusMenuOption:
+                competenciesMenuOption.statusMenuOption = True
+                hasChanges = True
+            if competenciesMenuOption.orderMenuOption != competenciesMenuOrder:
+                competenciesMenuOption.orderMenuOption = competenciesMenuOrder
+                hasChanges = True
+
         administratorRoles = [
             role
             for role in db.query(Role).all()
@@ -117,24 +148,28 @@ def seedRequiredCatalogs() -> None:
         ]
 
         for administratorRole in administratorRoles:
-            existingAssignment = (
-                db.query(RoleMenuOption)
-                .filter(
-                    RoleMenuOption.IdRole == administratorRole.IdRole,
-                    RoleMenuOption.IdMenuOption
-                    == parametersMenuOption.IdMenuOption,
-                )
-                .first()
-            )
-
-            if not existingAssignment:
-                db.add(
-                    RoleMenuOption(
-                        IdRole=administratorRole.IdRole,
-                        IdMenuOption=parametersMenuOption.IdMenuOption,
+            for requiredMenuOption in (
+                parametersMenuOption,
+                competenciesMenuOption,
+            ):
+                existingAssignment = (
+                    db.query(RoleMenuOption)
+                    .filter(
+                        RoleMenuOption.IdRole == administratorRole.IdRole,
+                        RoleMenuOption.IdMenuOption
+                        == requiredMenuOption.IdMenuOption,
                     )
+                    .first()
                 )
-                hasChanges = True
+
+                if not existingAssignment:
+                    db.add(
+                        RoleMenuOption(
+                            IdRole=administratorRole.IdRole,
+                            IdMenuOption=requiredMenuOption.IdMenuOption,
+                        )
+                    )
+                    hasChanges = True
 
         if hasChanges:
             db.commit()
