@@ -7,9 +7,9 @@ explícita, Nginx limita el cuerpo de cada petición a `1m` (1 MiB), por lo que 
 archivo de aproximadamente 1.125 KB supera ese límite. Esto es independiente del
 espacio libre en disco y de la cantidad de páginas del PDF.
 
-`frontend/nginx.conf` configura `client_max_body_size 20m` dentro de `location
-/api/`. El límite de 20 MiB incluye el archivo y los datos adicionales del
-formulario multipart; no equivale a admitir un archivo de exactamente 20 MiB.
+`frontend/nginx.conf` configura `client_max_body_size 5m` dentro de `location
+/api/`. El límite de 5 MiB incluye el archivo y los datos adicionales del
+formulario multipart; no equivale a admitir un archivo de exactamente 5 MiB.
 Esta configuración se comparte con producción cuando allí se despliegue el cambio.
 
 Referencia: [client_max_body_size en Nginx](https://nginx.org/en/docs/http/ngx_http_core_module.html#client_max_body_size).
@@ -30,7 +30,7 @@ docker exec assistance-app-qa-frontend nginx -t
 docker exec assistance-app-qa-frontend nginx -T 2>&1 | grep -n -A 8 'location /api/'
 ```
 
-El último comando debe mostrar `client_max_body_size 20m;` dentro de `/api/`.
+El último comando debe mostrar `client_max_body_size 5m;` dentro de `/api/`.
 
 ### Si persiste el 413
 
@@ -43,7 +43,7 @@ sudo nginx -T 2>&1 | grep -n -E 'configuration file|server_name|client_max_body_
 ```
 
 En el bloque `server` que atiende HTTPS para `qa-assistanceapp.calcoweb.net`,
-configura `client_max_body_size 20m;`. Revisa que el `location` que recibe `/api/`
+configura `client_max_body_size 5m;`. Revisa que el `location` que recibe `/api/`
 no establezca un límite menor. Después valida y recarga:
 
 ```bash
