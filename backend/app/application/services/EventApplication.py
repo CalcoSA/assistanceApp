@@ -1,15 +1,62 @@
-from app.domain.dtos.EventDto import (EventCreateDto, EventQrResponseDto, EventResponseDto, EventUpdateDto, EventPaginatedResponseDto)
+from app.domain.dtos.EventDto import (EventCreateDto, EventQrResponseDto, EventResponseDto, EventUpdateDto, EventCancelDto, EventPaginatedResponseDto)
 from app.application.interfaces.IEventApplication import IEventApplication
 from app.application.interfaces.IEventNotificationApplication import IEventNotificationApplication
+from app.application.services.PensumFile import readPensumUpload
+from app.domain.dtos.TrainingParameterDto import normalizeTopics
 from app.domain.interfaces.IEventRepository import IEventRepository
 from app.domain.dtos.EventDto import EventAttendanceResponseDto
 from app.infrastructure.db.config import APP_TIMEZONE_INFO, settings
+from app.infrastructure.storage.GcsStorage import GcsStorage
 from app.domain.entities.Event import Event
 from fastapi import UploadFile
 from datetime import datetime, time, timedelta
 import qrcode
 import uuid
 import os
+import logging
+from pathlib import Path
+from contextlib import asynccontextmanager
+import asyncio
+import re
+
+logger = logging.getLogger(__name__)
+QR_CLEANUP_INTERVAL_SECONDS = 300
+
+
+def cleanupEventQrs() -> None:
+    # Each pass owns its session inside the worker thread; request sessions are
+    # never shared with the periodic task or other server processes.
+    from app.infrastructure.db.connection import SessionLocal
+    from app.infrastructure.repositories.EventRepository import EventRepository
+
+    with SessionLocal() as db:
+        EventApplication(EventRepository(db)).cleanupExpiredQrs()
+
+
+@asynccontextmanager
+async def eventQrLifespan(app):
+    stop = asyncio.Event()
+
+    async def cleanup():
+        try:
+            await asyncio.to_thread(cleanupEventQrs)
+        except Exception as error:
+            logger.warning("No fue posible completar la limpieza de QR; se reintentará | errorType=%s", type(error).__name__)
+
+    async def periodicallyCleanup():
+        while not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), QR_CLEANUP_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                await cleanup()
+
+    await cleanup()
+    task = asyncio.create_task(periodicallyCleanup(), name="event-qr-cleanup")
+    try:
+        yield
+    finally:
+        stop.set()
+        await task
 
 class EventApplication(IEventApplication):
 
@@ -77,10 +124,47 @@ class EventApplication(IEventApplication):
 
         attendances = self.eventRepository.getAttendancesByEvent(IdEvent)
 
-        return [
-            EventAttendanceResponseDto.model_validate(attendance)
-            for attendance in attendances
-        ]
+        result = []
+        for attendance in attendances:
+            item = EventAttendanceResponseDto.model_validate(attendance)
+            if item.attendancePerson and item.attendancePerson.signaturePathAttendancePerson:
+                # Keep storage references in the DB; expose an authorized backend
+                # resource for both the signature viewer and the Excel export.
+                item.attendancePerson.signaturePathAttendancePerson = (
+                    f"/events/{IdEvent}/attendances/{item.IdAttendance}/signature"
+                )
+            result.append(item)
+        return result
+
+    def getAttendanceSignatureByUserScope(
+        self, IdEvent: int, IdAttendance: int, userLogin: str, roles: list[str],
+    ) -> bytes:
+        eventFound = self.eventRepository.getById(IdEvent)
+        if not eventFound:
+            raise ValueError("El evento no existe.")
+        if not self._userCanAccessEvent(eventFound, userLogin, roles):
+            raise PermissionError("No tiene permisos para consultar las firmas de este evento.")
+        attendance = self.eventRepository.getAttendanceByEvent(IdEvent, IdAttendance)
+        person = attendance.attendancePerson if attendance else None
+        reference = person.signaturePathAttendancePerson if person else None
+        if not reference:
+            raise ValueError("No se encontró la firma registrada.")
+        if reference.startswith("gs://"):
+            with GcsStorage() as storage:
+                relativePath = storage.relativePathFromReference(reference)
+                if not relativePath.startswith(f"signatures/{person.IdAttendancePerson}/"):
+                    raise ValueError("La referencia no corresponde a la firma de esta persona.")
+                return storage.download(relativePath)
+
+        # Historical signatures stay on disk. Resolve only within uploads/signatures,
+        # rejecting traversal, absolute paths and symlinks outside that directory.
+        if not reference.startswith("/uploads/signatures/"):
+            raise ValueError("La referencia de firma local no es válida.")
+        root = (Path(settings.UPLOAD_DIR).resolve() / "signatures").resolve()
+        path = (root / reference.removeprefix("/uploads/signatures/")).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise ValueError("No se encontró la firma registrada.")
+        return path.read_bytes()
     
     def getPaginatedByUserScope(self, page: int, pageSize: int, status, userLogin: str, roles: list[str],):
         createdByUserLogin = None
@@ -102,6 +186,13 @@ class EventApplication(IEventApplication):
             raise PermissionError("No tiene permisos para crear eventos.")
 
         self._validateCreateData(eventData)
+        if eventData.IdTrainingParameter is not None:
+            if len(eventData.titleEvent.strip().upper()) > 200:
+                raise ValueError("El título del evento no puede superar 200 caracteres.")
+            if "topics" in eventData.model_fields_set:
+                if not eventData.topics:
+                    raise ValueError("El evento parametrizado debe tener al menos un tema.")
+                normalizeTopics(eventData.topics)
         facilitatorData = self._normalizeEventFacilitators(
             facilitatorName=eventData.facilitatorNameEvent,
             facilitatorType=eventData.facilitatorTypeEvent,
@@ -111,6 +202,10 @@ class EventApplication(IEventApplication):
             secondFacilitatorType=eventData.secondFacilitatorTypeEvent,
             secondFacilitatorCompany=eventData.secondFacilitatorCompanyEvent,
             secondFacilitatorPosition=eventData.secondFacilitatorPositionEvent,
+            thirdFacilitatorName=eventData.thirdFacilitatorNameEvent,
+            thirdFacilitatorType=eventData.thirdFacilitatorTypeEvent,
+            thirdFacilitatorCompany=eventData.thirdFacilitatorCompanyEvent,
+            thirdFacilitatorPosition=eventData.thirdFacilitatorPositionEvent,
         )
 
         createdAt = self._currentDateTime()
@@ -127,8 +222,11 @@ class EventApplication(IEventApplication):
         publicUrlEvent = f"{self.publicAttendanceBaseUrl}/{tokenEvent}"
         qrPathEvent = self._generateQr(tokenEvent, publicUrlEvent)
         uppercaseTopics = [topic.strip().upper() for topic in eventData.topics if topic.strip()]
+        if eventData.IdTrainingParameter is not None and "topics" not in eventData.model_fields_set:
+            uppercaseTopics = None
 
         newEvent = Event(
+            IdTrainingParameter=eventData.IdTrainingParameter,
             titleEvent=eventData.titleEvent.strip().upper(),
             descriptionEvent=self._uppercaseOptionalText(eventData.descriptionEvent),
             dateEvent=eventData.dateEvent,
@@ -187,6 +285,11 @@ class EventApplication(IEventApplication):
         if not self._userCanAccessEvent(eventFound, userLogin, roles):
             raise PermissionError("No tiene permisos para actualizar este evento.")
 
+        if getattr(eventFound, "IdTrainingParameter", None) is not None and eventData.topics is not None:
+            eventData.topics = normalizeTopics(eventData.topics)
+            if not eventData.topics:
+                raise ValueError("El evento parametrizado debe tener al menos un tema.")
+
         if eventFound.IdEventStatus == self.STATUS_CANCELLED:
             raise ValueError("No se puede actualizar un evento cancelado.")
 
@@ -242,6 +345,29 @@ class EventApplication(IEventApplication):
                 "secondFacilitatorPositionEvent",
                 eventFound.secondFacilitatorPositionEvent,
             ),
+            thirdFacilitatorName=self._getFinalUpdateValue(
+                eventData,
+                "thirdFacilitatorNameEvent",
+                eventFound.thirdFacilitatorNameEvent,
+            ),
+            thirdFacilitatorType=self._getFinalUpdateValue(
+                eventData,
+                "thirdFacilitatorTypeEvent",
+                self._inferFacilitatorType(
+                    eventFound.thirdFacilitatorNameEvent,
+                    eventFound.thirdFacilitatorCompanyEvent,
+                ),
+            ),
+            thirdFacilitatorCompany=self._getFinalUpdateValue(
+                eventData,
+                "thirdFacilitatorCompanyEvent",
+                eventFound.thirdFacilitatorCompanyEvent,
+            ),
+            thirdFacilitatorPosition=self._getFinalUpdateValue(
+                eventData,
+                "thirdFacilitatorPositionEvent",
+                eventFound.thirdFacilitatorPositionEvent,
+            ),
         )
 
         updateData = eventData.model_dump(
@@ -252,6 +378,7 @@ class EventApplication(IEventApplication):
                 "durationEvent",
                 "facilitatorTypeEvent",
                 "secondFacilitatorTypeEvent",
+                "thirdFacilitatorTypeEvent",
             },
         )
         updateData.update(facilitatorData)
@@ -303,7 +430,12 @@ class EventApplication(IEventApplication):
 
         return self._buildResponse(eventUpdated)
 
-    def cancel(self, IdEvent: int, userLogin: str, roles: list[str]):
+    def cancel(self, IdEvent: int, eventData: EventCancelDto, userLogin: str, roles: list[str]):
+        cancellationReason = eventData.cancellationReason.strip()
+
+        if not cancellationReason:
+            raise ValueError("El motivo de cancelación es obligatorio.")
+
         eventFound = self.eventRepository.getById(IdEvent)
 
         if not eventFound:
@@ -325,12 +457,21 @@ class EventApplication(IEventApplication):
         if self._eventHasStarted(eventFound) and attendanceCount > 0:
             raise ValueError("No se puede cancelar el evento porque ya inició y tiene asistentes registrados.")
 
-        eventCancelled = self.eventRepository.cancel(IdEvent)
+        cancellationObservation = f"Motivo de cancelación: {cancellationReason}"
+        existingObservations = eventFound.observationsEvent
+        observationsEvent = (
+            f"{existingObservations.rstrip()}\n{cancellationObservation}"
+            if existingObservations and existingObservations.strip()
+            else cancellationObservation
+        )
+        eventCancelled = self.eventRepository.cancel(IdEvent, observationsEvent)
 
         if not eventCancelled:
             raise ValueError("El evento no existe.")
 
-        return self._buildResponse(eventCancelled)
+        response = self._buildResponse(eventCancelled)
+        self._cleanupEventQr(IdEvent)
+        return response
 
     def delete(self, IdEvent: int, userLogin: str, roles: list[str]) -> bool:
         eventFound = self.eventRepository.getById(IdEvent)
@@ -357,7 +498,68 @@ class EventApplication(IEventApplication):
 
         eventFound = self._syncStatusByEndDateTime(eventFound)
 
-        return EventQrResponseDto(IdEvent=eventFound.IdEvent, tokenEvent=eventFound.tokenEvent, publicUrlEvent=eventFound.publicUrlEvent, qrPathEvent=eventFound.qrPathEvent)
+        return EventQrResponseDto(IdEvent=eventFound.IdEvent, tokenEvent=eventFound.tokenEvent, publicUrlEvent=eventFound.publicUrlEvent, qrPathEvent=self._visibleQrPath(eventFound))
+
+    def getQrImage(self, IdEvent: int, userLogin: str, roles: list[str]) -> bytes:
+        qrInfo = self.getQrInfo(IdEvent, userLogin, roles)
+        if not qrInfo.qrPathEvent:
+            raise ValueError("El QR ya no está disponible para este evento.")
+        try:
+            # Read before returning the response. A concurrent unlink is either
+            # harmless to an open file or results in a controlled 404, not a late
+            # FileResponse error after the response headers were already sent.
+            return self._resolveQrPath(qrInfo).read_bytes()
+        except OSError:
+            raise ValueError("No se encontró la imagen QR en el servidor.") from None
+
+    def _qrHasExpired(self, event: Event) -> bool:
+        return event.IdEventStatus == self.STATUS_CANCELLED or self._currentDateTime() > self._getAttendanceEndDateTime(
+            event.dateEvent, event.endTimeEvent,
+        )
+
+    def _resolveQrPath(self, event) -> Path:
+        token = event.tokenEvent
+        if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", token):
+            raise ValueError("El nombre del QR no es válido.")
+        fileName = f"qr_event_{token}.png"
+        if event.qrPathEvent != f"/uploads/qrs/{fileName}":
+            raise ValueError("La ruta no corresponde al QR de este evento.")
+        root = Path(self.uploadDir).resolve() / "qrs"
+        path = root / fileName
+        if root.resolve() != root or path.is_symlink() or path.resolve().parent != root:
+            raise ValueError("La ruta del QR no está dentro del directorio permitido.")
+        return path
+
+    def _visibleQrPath(self, event: Event) -> str | None:
+        if not getattr(event, "qrPathEvent", None) or self._qrHasExpired(event):
+            return None
+        try:
+            return event.qrPathEvent if self._resolveQrPath(event).is_file() else None
+        except (OSError, ValueError):
+            return None
+
+    def _removeExpiredQr(self, event: Event) -> bool:
+        if not self._qrHasExpired(event):
+            return False
+        self._resolveQrPath(event).unlink(missing_ok=True)
+        return True
+
+    def _cleanupEventQr(self, IdEvent: int) -> None:
+        try:
+            self.eventRepository.cleanupQr(IdEvent, self._removeExpiredQr)
+        except Exception as error:
+            logger.warning("Limpieza de QR pendiente; se reintentará | IdEvent=%s | errorType=%s", IdEvent, type(error).__name__)
+
+    def cleanupExpiredQrs(self) -> None:
+        throughDate = self._currentDateTime().date()
+        afterId = 0
+        while True:
+            candidates = self.eventRepository.getQrCleanupCandidates(throughDate, afterId)
+            if not candidates:
+                return
+            for eventId in candidates:
+                self._cleanupEventQr(eventId)
+            afterId = candidates[-1]
 
     def _validateCreateData(self, eventData: EventCreateDto) -> None:
         if not eventData.titleEvent.strip():
@@ -540,6 +742,10 @@ class EventApplication(IEventApplication):
         secondFacilitatorType: str | None,
         secondFacilitatorCompany: str | None,
         secondFacilitatorPosition: str | None,
+        thirdFacilitatorName: str | None,
+        thirdFacilitatorType: str | None,
+        thirdFacilitatorCompany: str | None,
+        thirdFacilitatorPosition: str | None,
     ) -> dict[str, str | None]:
         principal = self._normalizeFacilitator(
             name=facilitatorName,
@@ -559,6 +765,15 @@ class EventApplication(IEventApplication):
             required=False,
             positionRequired=False,
         )
+        third = self._normalizeFacilitator(
+            name=thirdFacilitatorName,
+            facilitatorType=thirdFacilitatorType,
+            company=thirdFacilitatorCompany,
+            position=thirdFacilitatorPosition,
+            label="tercer facilitador",
+            required=False,
+            positionRequired=False,
+        )
 
         return {
             "facilitatorNameEvent": principal["name"],
@@ -567,6 +782,9 @@ class EventApplication(IEventApplication):
             "secondFacilitatorNameEvent": second["name"],
             "secondFacilitatorCompanyEvent": second["company"],
             "secondFacilitatorPositionEvent": second["position"],
+            "thirdFacilitatorNameEvent": third["name"],
+            "thirdFacilitatorCompanyEvent": third["company"],
+            "thirdFacilitatorPositionEvent": third["position"],
         }
 
     def _normalizeFacilitator(
@@ -685,6 +903,7 @@ class EventApplication(IEventApplication):
 
         return response.model_copy(
             update={
+                "qrPathEvent": self._visibleQrPath(event),
                 "facilitatorTypeEvent": self._inferFacilitatorType(
                     event.facilitatorNameEvent,
                     event.facilitatorCompanyEvent,
@@ -692,6 +911,10 @@ class EventApplication(IEventApplication):
                 "secondFacilitatorTypeEvent": self._inferFacilitatorType(
                     event.secondFacilitatorNameEvent,
                     event.secondFacilitatorCompanyEvent,
+                ),
+                "thirdFacilitatorTypeEvent": self._inferFacilitatorType(
+                    event.thirdFacilitatorNameEvent,
+                    event.thirdFacilitatorCompanyEvent,
                 ),
             }
         )
@@ -702,78 +925,84 @@ class EventApplication(IEventApplication):
         if not eventFound:
             raise ValueError("El evento no existe.")
 
-        eventFound = self._syncStatusByEndDateTime(eventFound)
-
         if not self._userCanAccessEvent(eventFound, userLogin, roles):
             raise PermissionError("No tiene permisos para actualizar el pensum de este evento.")
+
+        if getattr(eventFound, "IdTrainingParameter", None) is not None:
+            raise ValueError("No se permite reemplazar el PÉNSUM de un evento parametrizado.")
+
+        eventFound = self._syncStatusByEndDateTime(eventFound)
 
         if self._eventHasStatus(eventFound, self.STATUS_CANCELLED_NAME):
             raise ValueError("No se puede actualizar el pensum de un evento cancelado.")
 
-        if not file or not file.filename:
-            raise ValueError("Debe adjuntar un archivo de pensum.")
-
-        allowedExtensions = {
-            ".pdf",
-            ".doc",
-            ".docm",
-            ".docx",
-            ".odt",
-            ".rtf",
-            ".txt",
-            ".csv",
-            ".ods",
-            ".xls",
-            ".xlsb",
-            ".xlsm",
-            ".xlsx",
-            ".odp",
-            ".ppt",
-            ".pptm",
-            ".pptx",
-            ".png",
-            ".jpg",
-            ".jpeg",
-        }
-
-        originalFileName = file.filename
-        extension = os.path.splitext(originalFileName)[1].lower()
-
-        if extension not in allowedExtensions:
-            raise ValueError(
-                "Tipo de archivo no permitido. Adjunte PDF, imagen o un "
-                "documento compatible con OnlyOffice."
-            )
-
-        pensumDirectory = os.path.join(self.uploadDir, "pensum", str(IdEvent))
-        os.makedirs(pensumDirectory, exist_ok=True)
-
-        if eventFound.pensumPathEvent:
-            oldFilePath = eventFound.pensumPathEvent.lstrip("/").replace("/", os.sep)
-
-            if os.path.exists(oldFilePath):
-                os.remove(oldFilePath)
-
+        originalFileName, extension, fileContent, mimeType = readPensumUpload(file)
+        oldReference = eventFound.pensumPathEvent
         fileName = f"pensum_event_{IdEvent}_{uuid.uuid4().hex}{extension}"
-        filePath = os.path.join(pensumDirectory, fileName)
+        relativePath = f"pensum/{IdEvent}/{fileName}"
+        with GcsStorage() as storage:
+            reference = storage.objectReference(relativePath)
+            generation = storage.upload(relativePath, fileContent, mimeType)
+            try:
+                eventUpdated = self.eventRepository.updatePensum(
+                    IdEvent=IdEvent,
+                    pensumOriginalNameEvent=originalFileName,
+                    pensumPathEvent=reference,
+                    pensumMimeTypeEvent=mimeType,
+                    pensumSizeEvent=len(fileContent),
+                    updatedByUserLogin=userLogin,
+                )
+            except Exception:
+                # A failed commit/refresh does not prove rollback, and a later
+                # read can still race an in-flight commit. Preserve both objects
+                # for recovery instead of risking a DB reference to deleted data.
+                logger.warning(
+                    "Pensum conservado en GCS tras error de persistencia | IdEvent=%s | object=%s",
+                    IdEvent, relativePath,
+                )
+                raise
+            if not eventUpdated:
+                # The repository explicitly found no event and performed no write.
+                try:
+                    storage.delete(relativePath, expectedGeneration=generation)
+                except Exception:
+                    logger.warning(
+                        "No se pudo retirar el Pensum sin evento | IdEvent=%s | object=%s",
+                        IdEvent, relativePath,
+                    )
+                raise ValueError("El evento no existe.")
 
-        fileContent = file.file.read()
-
-        with open(filePath, "wb") as outputFile:
-            outputFile.write(fileContent)
-
-        relativePath = f"/uploads/pensum/{IdEvent}/{fileName}"
-
-        eventUpdated = self.eventRepository.updatePensum(
-            IdEvent=IdEvent,
-            pensumOriginalNameEvent=originalFileName,
-            pensumPathEvent=relativePath,
-            pensumMimeTypeEvent=file.content_type or "application/octet-stream",
-            pensumSizeEvent=len(fileContent),
-            updatedByUserLogin=userLogin
-        )
-
-        if not eventUpdated:
-            raise ValueError("El evento no existe.")
+            # Never remove historical local files. A failed GCS cleanup must not
+            # undo a successful DB replacement or remove the newly stored object.
+            if oldReference and oldReference.startswith("gs://") and oldReference != reference:
+                try:
+                    oldPath = storage.relativePathFromReference(oldReference)
+                    if oldPath.startswith(f"pensum/{IdEvent}/"):
+                        storage.delete(oldPath)
+                except Exception:
+                    logger.warning("No se pudo retirar el Pensum GCS reemplazado | IdEvent=%s", IdEvent)
 
         return self._buildResponse(eventUpdated)
+
+    def getPensumReadUrl(
+        self, IdEvent: int, userLogin: str, roles: list[str], download: bool = False,
+    ) -> str:
+        eventFound = self.eventRepository.getById(IdEvent)
+        if not eventFound:
+            raise ValueError("El evento no existe.")
+        if not self._userCanAccessEvent(eventFound, userLogin, roles):
+            raise PermissionError("No tiene permisos para consultar este pensum.")
+        reference = eventFound.pensumPathEvent
+        if not reference:
+            raise ValueError("El evento no tiene un pensum adjunto.")
+        if not reference.startswith("gs://"):
+            return reference
+        with GcsStorage() as storage:
+            relativePath = storage.relativePathFromReference(reference)
+            if not relativePath.startswith("pensum/"):
+                raise ValueError("La referencia no corresponde a un pensum.")
+            if not storage.exists(relativePath):
+                raise ValueError("No se encontró el archivo pensum.")
+            return storage.generateReadUrl(
+                relativePath, fileName=eventFound.pensumOriginalNameEvent, download=download,
+            )

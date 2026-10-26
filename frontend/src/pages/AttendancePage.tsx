@@ -6,7 +6,6 @@ import { publicAttendanceService } from "../services/attendanceService";
 import type { SolutionCenter } from "../models/SolutionCenter";
 import { ResponseModal } from "../components/ResponseModal";
 import { getErrorMessage } from "../services/errorService";
-import { getBackendFileUrl } from "../services/backendFileService";
 import SignatureCanvas from "react-signature-canvas";
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -32,7 +31,6 @@ interface AttendanceFormState {
   IdSolutionCenter: number | "";
   IdPersonnelType: number | "";
   phoneAttendancePerson: string;
-  signaturePathAttendancePerson: string;
 }
 
 const emptyForm: AttendanceFormState = {
@@ -42,8 +40,11 @@ const emptyForm: AttendanceFormState = {
   IdSolutionCenter: "",
   IdPersonnelType: "",
   phoneAttendancePerson: "",
-  signaturePathAttendancePerson: "",
 };
+
+const personnelTypeOrder = [
+  "administrativo", "logística", "externo", "operaciones", "producción", "punto de venta",
+];
 
 export function AttendancePage() {
   const [signatureCanvasSize, setSignatureCanvasSize] = useState({ width: 700, height: 180, });
@@ -53,7 +54,6 @@ export function AttendancePage() {
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const signatureContainerRef = useRef<HTMLDivElement | null>(null);
   const [form, setForm] = useState<AttendanceFormState>(emptyForm);
-  const [replaceSignature, setReplaceSignature] = useState(false);
   const [searchingPerson, setSearchingPerson] = useState(false);
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const { tokenEvent } = useParams<{ tokenEvent: string }>();
@@ -117,16 +117,14 @@ export function AttendancePage() {
       const response = await publicAttendanceService.getPersonnelTypes();
 
       if (response.isSuccess && response.result) {
-        setPersonnelTypes(response.result);
-
-        const noAplica = response.result.find((item) => item.namePersonnelType.trim().toLowerCase() === "no aplica");
-
-        if (noAplica) {
-          setForm((prev) => ({
-            ...prev,
-            IdPersonnelType: noAplica.IdPersonnelType,
-          }));
-        }
+        setPersonnelTypes(
+          response.result
+            .filter((item) => personnelTypeOrder.includes(item.namePersonnelType.trim().toLowerCase()))
+            .sort((a, b) =>
+              personnelTypeOrder.indexOf(a.namePersonnelType.trim().toLowerCase())
+              - personnelTypeOrder.indexOf(b.namePersonnelType.trim().toLowerCase())
+            )
+        );
       }
     } catch {
       setPersonnelTypes([]);
@@ -173,6 +171,7 @@ export function AttendancePage() {
   };
 
   const searchPerson = async () => {
+    signatureRef.current?.clear();
     const documentNumber = form.documentNumberAttendancePerson.trim();
 
     if (!documentNumber) {
@@ -183,7 +182,6 @@ export function AttendancePage() {
     try {
       setSearchingPerson(true);
       setPersonFound(false);
-      setReplaceSignature(false);
 
       const response = await publicAttendanceService.getPersonByDocument(documentNumber);
 
@@ -195,12 +193,10 @@ export function AttendancePage() {
           fullNameAttendancePerson: "",
           positionAttendancePerson: "",
           IdSolutionCenter: "",
-          IdPersonnelType: prev.IdPersonnelType,
+          IdPersonnelType: "",
           phoneAttendancePerson: "",
-          signaturePathAttendancePerson: "",
         }));
 
-        signatureRef.current?.clear();
         return;
       }
 
@@ -214,15 +210,13 @@ export function AttendancePage() {
         fullNameAttendancePerson: person.fullNameAttendancePerson ?? "",
         positionAttendancePerson: person.positionAttendancePerson ?? "",
         IdSolutionCenter: person.IdSolutionCenter ?? "",
-        IdPersonnelType: prev.IdPersonnelType,
+        IdPersonnelType: person.IdPersonnelType ?? "",
         phoneAttendancePerson: person.phoneAttendancePerson ?? "",
-        signaturePathAttendancePerson: person.signaturePathAttendancePerson ?? "",
       }));
-
-      signatureRef.current?.clear();
     } catch (err) {
       showResponseModal("error", "Error", getErrorMessage(err));
     } finally {
+      signatureRef.current?.clear();
       setSearchingPerson(false);
     }
   };
@@ -232,12 +226,6 @@ export function AttendancePage() {
   };
 
   const getSignatureBase64 = () => {
-    const hasCurrentSignature = Boolean(form.signaturePathAttendancePerson);
-
-    if (hasCurrentSignature && !replaceSignature) {
-      return null;
-    }
-
     if (!signatureRef.current || signatureRef.current.isEmpty()) {
       return null;
     }
@@ -256,15 +244,12 @@ export function AttendancePage() {
       return false;
     }
 
-    if (!form.IdPersonnelType) {
+    if (!personnelTypes.some((item) => item.IdPersonnelType === form.IdPersonnelType)) {
       showResponseModal("warning", "Campo obligatorio", "Debe seleccionar el tipo de personal.");
       return false;
     }
 
-    const hasCurrentSignature = Boolean(form.signaturePathAttendancePerson);
-    const needsSignature = !hasCurrentSignature || replaceSignature;
-
-    if (needsSignature && (!signatureRef.current || signatureRef.current.isEmpty())) {
+    if (!signatureRef.current || signatureRef.current.isEmpty()) {
       showResponseModal("warning", "Campo obligatorio", "La firma es obligatoria.");
       return false;
     }
@@ -273,6 +258,8 @@ export function AttendancePage() {
   };
 
   const submitAttendance = async () => {
+    if (searchingPerson) return;
+
     if (!tokenEvent) {
       showResponseModal("error", "Error", "No se encontró el token del evento.");
       return;
@@ -306,7 +293,6 @@ export function AttendancePage() {
 
       setForm(emptyForm);
       setPersonFound(false);
-      setReplaceSignature(false);
       signatureRef.current?.clear();
     } catch (err) {
       const errorMessage = getErrorMessage(err);
@@ -410,13 +396,18 @@ export function AttendancePage() {
           <TextField
             select
             label="Tipo de personal"
-            value={form.IdPersonnelType}
+            value={personnelTypes.some((item) => item.IdPersonnelType === form.IdPersonnelType) ? form.IdPersonnelType : ""}
             onChange={(event) =>
-              handleFormChange("IdPersonnelType", Number(event.target.value))
+              handleFormChange("IdPersonnelType", event.target.value === "" ? "" : Number(event.target.value))
             }
             fullWidth
             required
+            slotProps={{
+              inputLabel: { shrink: true },
+              select: { displayEmpty: true },
+            }}
           >
+            <MenuItem value="" disabled>Seleccione</MenuItem>
             {personnelTypes.map((item) => (
               <MenuItem key={item.IdPersonnelType} value={item.IdPersonnelType}>
                 {item.namePersonnelType}
@@ -428,60 +419,41 @@ export function AttendancePage() {
             <Typography sx={{ color: "#4B2E1F", fontWeight: 700, mb: 1 }}>
               Firma
             </Typography>
-            {form.signaturePathAttendancePerson && !replaceSignature ? (
-              <Stack spacing={2}>
-                <Box
-                  component="img"
-                  src={getBackendFileUrl(form.signaturePathAttendancePerson)}
-                  alt="Firma registrada"
-                  sx={{ width: "100%", maxWidth: 420, height: 160, objectFit: "contain", border: "1px solid #E8D8C8", borderRadius: 2, bgcolor: "#fff", }}
+            <Stack spacing={1}>
+              <Box
+                ref={signatureContainerRef}
+                sx={{
+                  border: "1px solid #E8D8C8",
+                  borderRadius: 2,
+                  bgcolor: "#fff",
+                  width: "100%",
+                  height: 180,
+                  overflow: "hidden",
+                  touchAction: "none",
+                }}
+              >
+                <SignatureCanvas
+                  ref={signatureRef}
+                  canvasProps={{
+                    width: signatureCanvasSize.width,
+                    height: signatureCanvasSize.height,
+                    style: {
+                      width: `${signatureCanvasSize.width}px`,
+                      height: `${signatureCanvasSize.height}px`,
+                      display: "block",
+                      touchAction: "none",
+                    },
+                  }}
                 />
-                <Button variant="outlined" onClick={ () => setReplaceSignature(true) } disabled={ saving } sx={{ width: "fit-content", borderColor: "#8B6A55", color: "#4B2E1F", }}>
-                  Actualizar firma
+              </Box>
+              <Stack direction="row" spacing={1}>
+                <Button variant="outlined" onClick={ clearSignature } disabled={ saving } sx={{ borderColor: "#8B6A55", color: "#4B2E1F", }}>
+                  Limpiar firma
                 </Button>
               </Stack>
-            ) : (
-              <Stack spacing={1}>
-                <Box
-                  ref={signatureContainerRef}
-                  sx={{
-                    border: "1px solid #E8D8C8",
-                    borderRadius: 2,
-                    bgcolor: "#fff",
-                    width: "100%",
-                    height: 180,
-                    overflow: "hidden",
-                    touchAction: "none",
-                  }}
-                >
-                  <SignatureCanvas
-                    ref={signatureRef}
-                    canvasProps={{
-                      width: signatureCanvasSize.width,
-                      height: signatureCanvasSize.height,
-                      style: {
-                        width: `${signatureCanvasSize.width}px`,
-                        height: `${signatureCanvasSize.height}px`,
-                        display: "block",
-                        touchAction: "none",
-                      },
-                    }}
-                  />
-                </Box>
-                <Stack direction="row" spacing={1}>
-                  <Button variant="outlined" onClick={ clearSignature } disabled={ saving } sx={{ borderColor: "#8B6A55", color: "#4B2E1F", }}>
-                    Limpiar firma
-                  </Button>
-                  {form.signaturePathAttendancePerson && (
-                    <Button variant="text" onClick={() => { setReplaceSignature(false); signatureRef.current?.clear(); }} disabled={ saving } sx={{ color: "#4B2E1F" }}>
-                      Conservar firma actual
-                    </Button>
-                  )}
-                </Stack>
-              </Stack>
-            )}
+            </Stack>
           </Box>
-          <Button variant="contained" onClick={ submitAttendance } disabled={ saving } sx={{ bgcolor: "#4B2E1F", py: 1.4, fontWeight: 700, "&:hover": { bgcolor: "#3A2318" },}}>
+          <Button variant="contained" onClick={ submitAttendance } disabled={ saving || searchingPerson } sx={{ bgcolor: "#4B2E1F", py: 1.4, fontWeight: 700, "&:hover": { bgcolor: "#3A2318" },}}>
             {saving ? "Registrando..." : "Registrar asistencia"}
           </Button>
         </Stack>

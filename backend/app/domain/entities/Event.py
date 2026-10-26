@@ -16,6 +16,10 @@ class Event(Base):
     IdAssistanceReason = Column(Integer, ForeignKey("AssistanceReason.IdAssistanceReason"), nullable=True)
     IdSpecificTrainingProgram = Column(Integer, ForeignKey("SpecificTrainingProgram.IdSpecificTrainingProgram"), nullable=True)
     IdEventCategory = Column(Integer, ForeignKey("EventCategory.IdEventCategory"), nullable=True)
+    IdTrainingParameter = Column(
+        Integer, ForeignKey("trainingparameter.IdTrainingParameter", ondelete="RESTRICT"),
+        nullable=True,
+    )
     IdEventStatus = Column(Integer, ForeignKey("EventStatus.IdEventStatus"), nullable=False)
     facilitatorNameEvent = Column(String(200), nullable=True)
     facilitatorCompanyEvent = Column(String(200), nullable=True)
@@ -23,6 +27,9 @@ class Event(Base):
     secondFacilitatorNameEvent = Column(String(200), nullable=True)
     secondFacilitatorCompanyEvent = Column(String(200), nullable=True)
     secondFacilitatorPositionEvent = Column(String(150), nullable=True)
+    thirdFacilitatorNameEvent = Column(String(200), nullable=True)
+    thirdFacilitatorCompanyEvent = Column(String(200), nullable=True)
+    thirdFacilitatorPositionEvent = Column(String(150), nullable=True)
     scheduledPeopleNumber = Column(Integer, nullable=True)
     attendedPeopleNumber = Column(Integer, nullable=True)
     observationsEvent = Column(Text, nullable=True)

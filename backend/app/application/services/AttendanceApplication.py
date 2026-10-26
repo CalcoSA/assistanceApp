@@ -2,14 +2,20 @@ from app.domain.dtos.AttendanceDto import (PublicEventResponseDto, AttendancePer
 from app.application.interfaces.IAttendanceApplication import IPublicAttendanceApplication
 from app.domain.interfaces.IAttendancePersonRepository import IAttendancePersonRepository
 from app.domain.interfaces.IPersonnelTypeRepository import IPersonnelTypeRepository
-from app.domain.interfaces.IAttendanceRepository import IAttendanceRepository
+from app.domain.interfaces.IAttendanceRepository import IAttendanceRepository, AttendancePersistenceError
 from app.domain.interfaces.IEventRepository import IEventRepository
 from app.domain.entities.Event import Event
 from app.infrastructure.db.config import APP_TIMEZONE_INFO
+from app.infrastructure.storage.GcsStorage import GcsStorage
 from datetime import datetime, timedelta
+from io import BytesIO
+from PIL import Image
 import base64
-import os
+import logging
 import re
+import uuid
+
+logger = logging.getLogger(__name__)
 
 class PublicAttendanceApplication(IPublicAttendanceApplication):
 
@@ -22,7 +28,6 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
         self.eventRepository = eventRepository
         self.attendancePersonRepository = attendancePersonRepository
         self.attendanceRepository = attendanceRepository
-        self.uploadDir = os.getenv("UPLOAD_DIR", "uploads")
         self.personnelTypeRepository = personnelTypeRepository
 
     def getEventByToken(self, tokenEvent: str) -> PublicEventResponseDto:
@@ -39,20 +44,33 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
         if not personFound:
             return None
 
-        return AttendancePersonResponseDto.model_validate(personFound)
+        latestAttendance = self.attendanceRepository.getLatestByPerson(personFound.IdAttendancePerson)
+        personnelType = (
+            self.personnelTypeRepository.getById(latestAttendance.IdPersonnelType)
+            if latestAttendance else None
+        )
+        personnelTypeId = (
+            personnelType.IdPersonnelType
+            if personnelType and personnelType.namePersonnelType.strip().lower() != "no aplica"
+            else None
+        )
+
+        return AttendancePersonResponseDto.model_validate(personFound).model_copy(
+            update={"IdPersonnelType": personnelTypeId}
+        )
 
     def registerAttendance(self, tokenEvent: str, data: AttendanceRegisterDto, ipAddress: str | None, userAgent: str | None) -> AttendanceRegisterResponseDto:
         eventFound = self._getValidEventByToken(tokenEvent)
+        eventId = eventFound.IdEvent
 
         self._validateRegisterData(data)
 
         cleanDocument = data.documentNumberAttendancePerson.strip()
         personFound = self.attendancePersonRepository.getByDocument(cleanDocument)
-        signaturePath = None
 
         if personFound:
             existingAttendance = self.attendanceRepository.getByEventAndPerson(
-                eventFound.IdEvent,
+                eventId,
                 personFound.IdAttendancePerson,
             )
 
@@ -61,37 +79,58 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
                     "Esta persona ya registró asistencia para este evento."
                 )
 
-        if personFound and data.signatureBase64:
-            signaturePath = self._saveSignature(cleanDocument, data.signatureBase64, personFound.signaturePathAttendancePerson)
+        imageBytes = self._decodeSignature(data.signatureBase64)
+        receipt = {}
+        storage = GcsStorage()
+        try:
+            def saveSignature(personId: int) -> str:
+                path = f"signatures/{personId}/{uuid.uuid4().hex}.png"
+                receipt["path"] = path
+                reference = storage.objectReference(path)
+                receipt["generation"] = storage.upload(path, imageBytes, "image/png")
+                return reference
 
-        if not personFound and data.signatureBase64:
-            signaturePath = self._saveSignature(cleanDocument, data.signatureBase64, None)
+            try:
+                attendanceId, personId, attendanceCount, oldSignature = (
+                    self.attendanceRepository.registerWithSignature(
+                        eventId, data, ipAddress, userAgent, saveSignature,
+                    )
+                )
+            except Exception as error:
+                uncertain = isinstance(error, AttendancePersistenceError) and error.commitUncertain
+                if "generation" in receipt and not uncertain:
+                    try:
+                        storage.delete(receipt["path"], expectedGeneration=receipt["generation"])
+                    except Exception:
+                        logger.warning("Firma pendiente de limpieza tras rollback | object=%s", receipt["path"])
+                elif "path" in receipt:
+                    # A lost upload/commit acknowledgement cannot prove failure.
+                    # Never delete an object which may now be the current signature.
+                    logger.warning("Firma conservada por resultado incierto | object=%s", receipt["path"])
+                raise
 
-        if not personFound and not data.signatureBase64:
-            raise ValueError("Debe registrar la firma para guardar la asistencia.")
-
-        if personFound and not personFound.signaturePathAttendancePerson and not data.signatureBase64:
-            raise ValueError("Debe registrar la firma para guardar la asistencia.")
-
-        if personFound:
-            personSaved = self.attendancePersonRepository.update(personFound, data, signaturePath)
-        else:
-            personSaved = self.attendancePersonRepository.create(data, signaturePath)
-
-        attendanceCreated, attendanceCount = (
-            self.attendanceRepository.createAndCount(
-                eventFound.IdEvent,
-                personSaved.IdAttendancePerson,
-                data.IdPersonnelType,
-                ipAddress,
-                userAgent,
-            )
-        )
+            # The row lock supplied the actual previous signature, not the stale
+            # public lookup. Concurrent registrations therefore retire a chain of
+            # unique versions and never delete the current object of another call.
+            if oldSignature and oldSignature.startswith("gs://"):
+                try:
+                    oldPath = storage.relativePathFromReference(oldSignature)
+                    if re.fullmatch(rf"signatures/{personId}/[0-9a-f]{{32}}\.png", oldPath) and oldPath != receipt["path"]:
+                        storage.delete(oldPath)
+                except Exception:
+                    logger.warning("Firma anterior pendiente de limpieza | personId=%s", personId)
+        finally:
+            try:
+                storage.close()
+            except Exception:
+                # Closing a transport must not turn a committed attendance into
+                # an apparent failure or obscure the original registration error.
+                logger.warning("No fue posible cerrar el transporte de firmas GCS.")
 
         return AttendanceRegisterResponseDto(
-            IdAttendance=attendanceCreated.IdAttendance,
-            IdEvent=eventFound.IdEvent,
-            IdAttendancePerson=personSaved.IdAttendancePerson,
+            IdAttendance=attendanceId,
+            IdEvent=eventId,
+            IdAttendancePerson=personId,
             attendedPeopleNumber=attendanceCount
         )
 
@@ -181,8 +220,10 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
 
         personnelTypeFound = self.personnelTypeRepository.getById(data.IdPersonnelType)
 
-        if not personnelTypeFound:
+        if not personnelTypeFound or personnelTypeFound.namePersonnelType.strip().lower() == "no aplica":
             raise ValueError("El tipo de personal seleccionado no es válido.")
+
+        self._cleanRequiredText(data.signatureBase64, "Debe registrar la firma para guardar la asistencia.")
 
     def _cleanRequiredText(self, value: str | None, message: str) -> str:
         if not value or not value.strip():
@@ -190,40 +231,18 @@ class PublicAttendanceApplication(IPublicAttendanceApplication):
 
         return value.strip()
 
-    def _sanitizeDocument(self, documentNumber: str) -> str:
-        cleanDocument = re.sub(r"[^a-zA-Z0-9_-]", "", documentNumber)
-
-        if not cleanDocument:
-            raise ValueError("La cédula contiene caracteres no válidos.")
-
-        return cleanDocument
-
-    def _saveSignature(self, documentNumber: str, signatureBase64: str, oldSignaturePath: str | None) -> str:
-        cleanDocument = self._sanitizeDocument(documentNumber)
-
-        signatureDirectory = os.path.join(self.uploadDir, "signatures", cleanDocument)
-        os.makedirs(signatureDirectory, exist_ok=True)
-
-        if oldSignaturePath:
-            oldFilePath = oldSignaturePath.lstrip("/").replace("/", os.sep)
-
-            if os.path.exists(oldFilePath):
-                os.remove(oldFilePath)
-
-        signatureContent = signatureBase64
-
-        if "," in signatureContent:
-            signatureContent = signatureContent.split(",", 1)[1]
-
+    def _decodeSignature(self, signatureBase64: str) -> bytes:
         try:
-            imageBytes = base64.b64decode(signatureContent)
+            signatureContent = signatureBase64.strip()
+            if signatureContent.startswith("data:"):
+                header, signatureContent = signatureContent.split(",", 1)
+                if header != "data:image/png;base64":
+                    raise ValueError
+            imageBytes = base64.b64decode(signatureContent, validate=True)
+            with Image.open(BytesIO(imageBytes)) as image:
+                if image.format != "PNG":
+                    raise ValueError
+                image.verify()
+            return imageBytes
         except Exception:
-            raise ValueError("La firma no tiene un formato válido.")
-
-        fileName = f"signature_{cleanDocument}.png"
-        filePath = os.path.join(signatureDirectory, fileName)
-
-        with open(filePath, "wb") as outputFile:
-            outputFile.write(imageBytes)
-
-        return f"/uploads/signatures/{cleanDocument}/{fileName}"
+            raise ValueError("La firma debe ser una imagen PNG válida.") from None

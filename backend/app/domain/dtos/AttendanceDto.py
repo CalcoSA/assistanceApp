@@ -24,8 +24,8 @@ class AttendancePersonResponseDto(BaseModel):
     documentNumberAttendancePerson: str
     positionAttendancePerson: Optional[str] = None
     IdSolutionCenter: Optional[int] = None
+    IdPersonnelType: Optional[int] = None
     phoneAttendancePerson: Optional[str] = None
-    signaturePathAttendancePerson: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

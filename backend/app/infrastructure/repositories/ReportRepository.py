@@ -716,7 +716,7 @@ class ReportRepository(IReportRepository):
                 ).label("totalTransversalTrainingPeople"),
             )
             .select_from(Event)
-            .join(
+            .outerjoin(
                 AssistanceReason,
                 AssistanceReason.IdAssistanceReason == Event.IdAssistanceReason,
             )
@@ -725,9 +725,20 @@ class ReportRepository(IReportRepository):
                 AttendancePerson,
                 AttendancePerson.IdAttendancePerson == Attendance.IdAttendancePerson,
             )
+            .outerjoin(
+                PersonnelType,
+                PersonnelType.IdPersonnelType == Attendance.IdPersonnelType,
+            )
             .filter(
-                func.lower(func.trim(AssistanceReason.nameAssistanceReason))
-                == self.TRANSVERSAL_ASSISTANCE_REASON_NAME
+                or_(
+                    func.lower(func.trim(AssistanceReason.nameAssistanceReason))
+                    == self.TRANSVERSAL_ASSISTANCE_REASON_NAME,
+                    and_(
+                        Event.isNewStaffInductionEvent == True,
+                        func.lower(func.trim(PersonnelType.namePersonnelType))
+                        == self.ADMINISTRATIVE_PERSONNEL_TYPE_NAME,
+                    ),
+                )
             )
         )
 
@@ -753,7 +764,7 @@ class ReportRepository(IReportRepository):
                 ).label("totalTransversalTrainingHours"),
             )
             .select_from(Event)
-            .join(
+            .outerjoin(
                 AssistanceReason,
                 AssistanceReason.IdAssistanceReason == Event.IdAssistanceReason,
             )
@@ -763,12 +774,23 @@ class ReportRepository(IReportRepository):
                 AttendancePerson.IdAttendancePerson == Attendance.IdAttendancePerson,
             )
             .outerjoin(
+                PersonnelType,
+                PersonnelType.IdPersonnelType == Attendance.IdPersonnelType,
+            )
+            .outerjoin(
                 personSolutionCenter,
                 personSolutionCenter.c.IdSolutionCenter == AttendancePerson.IdSolutionCenter,
             )
             .filter(
-                func.lower(func.trim(AssistanceReason.nameAssistanceReason))
-                == self.TRANSVERSAL_ASSISTANCE_REASON_NAME
+                or_(
+                    func.lower(func.trim(AssistanceReason.nameAssistanceReason))
+                    == self.TRANSVERSAL_ASSISTANCE_REASON_NAME,
+                    and_(
+                        Event.isNewStaffInductionEvent == True,
+                        func.lower(func.trim(PersonnelType.namePersonnelType))
+                        == self.ADMINISTRATIVE_PERSONNEL_TYPE_NAME,
+                    ),
+                )
             )
         )
 
