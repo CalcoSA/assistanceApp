@@ -270,7 +270,6 @@ def test_all_operations_reject_unsafe_or_unscoped_paths(buildStorage, relativePa
     {"GCS_ENVIRONMENT": "production"},
     {"GCS_AUTH_MODE": "adc"},
     {"GCS_AUTH_MODE": "automatic"},
-    {"GCS_ENVIRONMENT": "qa", "GCS_PREFIX": "assistanceApp_qa/"},
     {"GCS_ENDPOINT": "http://storage.googleapis.com"},
     {"GCS_ENDPOINT": "https://storage.googleapis.com.attacker.test"},
     {"GCS_BUCKET": "calco-storage/other-app"},
@@ -280,6 +279,45 @@ def test_constructor_rejects_mixed_environments_and_unsafe_configuration(storage
         setattr(configuration, key, value)
     with pytest.raises(storageModule.GcsConfigurationError):
         storageModule.GcsStorage(configuration)
+
+
+def test_qa_accepts_hmac_with_qa_prefix_and_rejects_adc(storageModule, configuration):
+    configuration.GCS_ENVIRONMENT = "qa"
+    configuration.GCS_PREFIX = "assistanceApp_qa/"
+    configuration.GCS_AUTH_MODE = "hmac"
+    with storageModule.GcsStorage(configuration) as service:
+        assert service.objectReference("pensum/test.pdf") == (
+            "gs://calco-storage/assistanceApp_qa/pensum/test.pdf"
+        )
+
+    configuration.GCS_AUTH_MODE = "adc"
+    with pytest.raises(storageModule.GcsConfigurationError):
+        storageModule.GcsStorage(configuration)
+
+
+def test_qa_hmac_upload_and_signed_url_stay_inside_qa_prefix(buildStorage, configuration):
+    configuration.GCS_ENVIRONMENT = "qa"
+    configuration.GCS_AUTH_MODE = "hmac"
+    configuration.GCS_PREFIX = "assistanceApp_qa/"
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, headers={"x-goog-generation": "321"})
+
+    storage = buildStorage(handler)
+    assert storage.upload("pensum/test.pdf", b"synthetic document", "application/pdf") == 321
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.url.path == "/calco-storage/assistanceApp_qa/pensum/test.pdf"
+    assert request.headers["x-goog-if-generation-match"] == "0"
+    assertSignedRequest(request)
+
+    signedUrl = storage.generateReadUrl("pensum/test.pdf", expiresInSeconds=60)
+    parsed = urlsplit(signedUrl)
+    assert parsed.path == "/calco-storage/assistanceApp_qa/pensum/test.pdf"
+    assert parse_qs(parsed.query)["X-Goog-Algorithm"] == ["GOOG4-HMAC-SHA256"]
+    assert TEST_SECRET_KEY not in signedUrl
 
 
 @pytest.mark.parametrize("key", ["GCS_HMAC_ACCESS_KEY", "GCS_HMAC_SECRET_KEY"])
@@ -329,6 +367,9 @@ def test_transport_errors_do_not_expose_request_credentials(buildStorage, storag
 
 @pytest.fixture
 def adcStorage(storageModule, configuration, monkeypatch):
+    # Isolated coverage of the dormant ADC adapter, not the QA runtime policy.
+    # QA itself still requires HMAC; only this test-local copy allows ADC.
+    monkeypatch.setitem(storageModule.GcsStorage._ENVIRONMENTS, "qa", ("assistanceApp_qa/", "adc"))
     configuration.GCS_ENVIRONMENT = "qa"
     configuration.GCS_AUTH_MODE = "adc"
     configuration.GCS_PREFIX = "assistanceApp_qa/"
@@ -369,7 +410,7 @@ def test_signature_download_hmac_sanitizes_errors(buildStorage, storageModule, s
     assert "private details" not in str(error.value)
 
 
-def test_signature_download_adc_uses_private_qa_prefix(adcStorage):
+def test_adc_adapter_signature_download_uses_private_prefix(adcStorage):
     adcStorage.blob.download_as_bytes.return_value = b"synthetic image"
     assert adcStorage.storage.download("signatures/7/test.png") == b"synthetic image"
     adcStorage.client.bucket.return_value.blob.assert_called_once_with("assistanceApp_qa/signatures/7/test.png")
@@ -377,7 +418,7 @@ def test_signature_download_adc_uses_private_qa_prefix(adcStorage):
 
 
 @pytest.mark.parametrize("code", [404, 403])
-def test_signature_download_adc_sanitizes_errors(adcStorage, storageModule, code):
+def test_adc_adapter_signature_download_sanitizes_errors(adcStorage, storageModule, code):
     error = RuntimeError("private details")
     error.code = code
     adcStorage.blob.download_as_bytes.side_effect = error
@@ -391,7 +432,7 @@ def test_signature_download_rejects_unsafe_path_before_network(buildStorage):
         buildStorage().download("signatures/7/../../../private.png")
 
 
-def test_qa_adc_upload_uses_qa_prefix_and_generation_precondition(adcStorage):
+def test_adc_adapter_upload_uses_qa_prefix_and_generation_precondition(adcStorage):
     generation = adcStorage.storage.upload("pensum/test.xlsx", b"test spreadsheet", "application/octet-stream")
     assert generation == 321
     adcStorage.client.bucket.assert_called_with("calco-storage")
@@ -399,14 +440,14 @@ def test_qa_adc_upload_uses_qa_prefix_and_generation_precondition(adcStorage):
     adcStorage.blob.upload_from_string.assert_called_once_with(b"test spreadsheet", content_type="application/octet-stream", if_generation_match=0, timeout=30, retry=None)
 
 
-def test_qa_adc_exists_and_conditional_delete(adcStorage):
+def test_adc_adapter_exists_and_conditional_delete(adcStorage):
     assert adcStorage.storage.exists("signatures/test.png") is True
     adcStorage.blob.exists.assert_called_once_with(timeout=30, retry=None)
     assert adcStorage.storage.delete("signatures/test.png", expectedGeneration=321) is True
     adcStorage.blob.delete.assert_called_once_with(if_generation_match=321, timeout=30, retry=None)
 
 
-def test_qa_adc_signed_url_uses_vm_token_for_iam_signing(adcStorage, caplog):
+def test_adc_adapter_signed_url_uses_vm_token_for_iam_signing(adcStorage, caplog):
     signedUrl = adcStorage.storage.generateReadUrl("pensum/test.xlsx", expiresInSeconds=60)
     assert signedUrl == adcStorage.blob.generate_signed_url.return_value
     kwargs = adcStorage.blob.generate_signed_url.call_args.kwargs
@@ -419,7 +460,7 @@ def test_qa_adc_signed_url_uses_vm_token_for_iam_signing(adcStorage, caplog):
     assert adcStorage.credentials.token not in caplog.text
 
 
-def test_qa_adc_refreshes_expired_vm_token_before_signing(adcStorage):
+def test_adc_adapter_refreshes_expired_vm_token_before_signing(adcStorage):
     adcStorage.credentials.valid = False
 
     def refresh(request):
@@ -433,7 +474,7 @@ def test_qa_adc_refreshes_expired_vm_token_before_signing(adcStorage):
     assert kwargs["access_token"] == "refreshed-adc-test-token"
 
 
-def test_qa_adc_without_resolved_signer_fails_clearly(adcStorage, storageModule):
+def test_adc_adapter_without_resolved_signer_fails_clearly(adcStorage, storageModule):
     adcStorage.storage._signingEmail = None
     adcStorage.credentials.service_account_email = "default"
     with pytest.raises(storageModule.GcsConfigurationError):
@@ -441,7 +482,7 @@ def test_qa_adc_without_resolved_signer_fails_clearly(adcStorage, storageModule)
     adcStorage.blob.generate_signed_url.assert_not_called()
 
 
-def test_qa_adc_errors_do_not_fallback_or_expose_tokens(adcStorage, storageModule, caplog):
+def test_adc_adapter_errors_do_not_fallback_or_expose_tokens(adcStorage, storageModule, caplog):
     adcStorage.blob.exists.side_effect = RuntimeError("private adc-test-token detail")
     with pytest.raises(storageModule.GcsStorageError) as error:
         adcStorage.storage.exists("pensum/test.txt")
@@ -450,7 +491,7 @@ def test_qa_adc_errors_do_not_fallback_or_expose_tokens(adcStorage, storageModul
     adcStorage.blob.exists.assert_called_once()
 
 
-def test_qa_adc_maps_not_found_and_precondition_failures(adcStorage, storageModule):
+def test_adc_adapter_maps_not_found_and_precondition_failures(adcStorage, storageModule):
     from google.api_core.exceptions import NotFound, PreconditionFailed
 
     adcStorage.blob.delete.side_effect = NotFound("sensitive missing detail")
@@ -464,6 +505,8 @@ def test_adc_initialization_uses_google_identity_scope_and_configured_endpoint(s
     import google.auth
     from google.cloud import storage
 
+    # Test the ADC adapter in isolation; production QA is HMAC-only.
+    monkeypatch.setitem(storageModule.GcsStorage._ENVIRONMENTS, "qa", ("assistanceApp_qa/", "adc"))
     configuration.GCS_ENVIRONMENT = "qa"
     configuration.GCS_AUTH_MODE = "adc"
     configuration.GCS_PREFIX = "assistanceApp_qa/"
@@ -488,6 +531,8 @@ def test_adc_initialization_failure_never_falls_back_to_available_hmac_credentia
     import google.auth
     from google.cloud import storage
 
+    # Test the ADC adapter in isolation; production QA is HMAC-only.
+    monkeypatch.setitem(storageModule.GcsStorage._ENVIRONMENTS, "qa", ("assistanceApp_qa/", "adc"))
     configuration.GCS_ENVIRONMENT = "qa"
     configuration.GCS_AUTH_MODE = "adc"
     configuration.GCS_PREFIX = "assistanceApp_qa/"

@@ -43,7 +43,7 @@ class GcsStorage(IObjectStorage):
 
     _ENVIRONMENTS = {
         "development": ("assistanceApp_dev/", "hmac"),
-        "qa": ("assistanceApp_qa/", "adc"),
+        "qa": ("assistanceApp_qa/", "hmac"),
     }
     _ALGORITHM = "GOOG4-HMAC-SHA256"
 
@@ -79,7 +79,7 @@ class GcsStorage(IObjectStorage):
         if configuration.GCS_PREFIX != expected[0]:
             raise GcsConfigurationError("GCS_PREFIX no corresponde al entorno GCS_ENVIRONMENT.")
         if configuration.GCS_AUTH_MODE != expected[1]:
-            raise GcsConfigurationError("Development requiere GCS_AUTH_MODE=hmac; QA requiere adc.")
+            raise GcsConfigurationError("Development y QA requieren GCS_AUTH_MODE=hmac.")
         if not configuration.GCS_BUCKET or not re.fullmatch(
             r"[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]", configuration.GCS_BUCKET,
         ):
