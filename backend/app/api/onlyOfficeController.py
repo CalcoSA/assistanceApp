@@ -7,7 +7,8 @@ from app.infrastructure.logging.loggerConfig import getLogger
 from app.infrastructure.repositories.EventRepository import EventRepository
 from app.api.authController import getCurrentPayload
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from pathlib import Path
 from sqlalchemy.orm import Session
 
 
@@ -124,15 +125,22 @@ def getEventPensumPreview(
 @router.get("/files/{accessToken}", include_in_schema=False)
 def getOnlyOfficeFile(
     accessToken: str,
-    service: IOnlyOfficeApplication = Depends(getOnlyOfficeApplication),
+    service: OnlyOfficeApplication = Depends(getOnlyOfficeApplication),
 ):
     try:
         filePath, originalFileName, mimeType = service.resolveFileAccess(accessToken)
-        return FileResponse(
+        response = FileResponse(
             path=filePath,
             media_type=mimeType,
             filename=originalFileName,
         )
+        if Path(filePath).parent == service.previewDirectory:
+            return Response(
+                content=service.readTemporaryFile(filePath),
+                media_type=mimeType,
+                headers={"content-disposition": response.headers["content-disposition"]},
+            )
+        return response
     except PermissionError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -149,4 +157,3 @@ def getOnlyOfficeFile(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No fue posible entregar el documento.",
         ) from error
-

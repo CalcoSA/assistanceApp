@@ -11,6 +11,8 @@ import EventOutlinedIcon from "@mui/icons-material/EventOutlined";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
 import PsychologyOutlinedIcon from "@mui/icons-material/PsychologyOutlined";
+import SchoolOutlinedIcon from "@mui/icons-material/SchoolOutlined";
+import HistoryOutlinedIcon from "@mui/icons-material/HistoryOutlined";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import InstagramIcon from "@mui/icons-material/Instagram";
 import LanguageIcon from "@mui/icons-material/Language";
@@ -25,6 +27,7 @@ interface MenuItem {
   label: string;
   path: string;
   icon: ReactNode;
+  administrative?: boolean;
 }
 
 interface SidebarProps {
@@ -36,6 +39,7 @@ const SIDEBAR_CLOSED_WIDTH = 82;
 const SIDEBAR_OPEN_WIDTH = 260;
 
 const masterItems: MenuItem[] = [
+  { label: "Histórico de PÉNSUM", path: "/maestros/historico-pensum", icon: <HistoryOutlinedIcon />, administrative: true },
   {
     label: "Centro de soluciones",
     path: "/maestros/centro-soluciones",
@@ -60,6 +64,12 @@ const masterItems: MenuItem[] = [
     label: "Competencias",
     path: "/maestros/competencias",
     icon: <PsychologyOutlinedIcon />,
+  },
+  {
+    label: "Parametrización de capacitaciones",
+    path: "/maestros/capacitaciones",
+    icon: <SchoolOutlinedIcon />,
+    administrative: true,
   },
 ];
 
@@ -311,14 +321,14 @@ export function AppLayout() {
 }
 
 function Sidebar({ sidebarOpen, onToggleSidebar }: SidebarProps) {
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, isAdministrator } = useAuth();
   const location = useLocation();
 
   const isMastersActive = location.pathname.startsWith("/maestros");
   const [mastersOpen, setMastersOpen] = useState(isMastersActive);
 
   const allowedMasterItems = masterItems.filter((item) =>
-    hasPermission(item.path)
+    hasPermission(item.path) && (!item.administrative || isAdministrator)
   );
 
   const allowedMainItems = mainItems.filter((item) =>
@@ -576,7 +586,7 @@ function Sidebar({ sidebarOpen, onToggleSidebar }: SidebarProps) {
                         sx={{
                           fontSize: 14,
                           fontWeight: 600,
-                          whiteSpace: "nowrap",
+                          whiteSpace: "normal",
                         }}
                       >
                         {item.label}

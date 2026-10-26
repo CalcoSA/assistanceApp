@@ -6,6 +6,20 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 
+def requireAdministrator(payload: dict = Depends(getCurrentPayload)) -> dict:
+    roles = payload.get("roles") or []
+    # Same administrator role names already recognized by the catalog permissions.
+    allowed = {"administrador", "superadministrador", "superadmin"}
+    if not isinstance(roles, list) or not any(
+        isinstance(role, str) and role.strip().lower() in allowed for role in roles
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Se requieren permisos administrativos para realizar esta operación.",
+        )
+    return payload
+
+
 def requireMenuPermission(pathMenuOption: str):
     def dependency(
         payload: dict = Depends(getCurrentPayload),

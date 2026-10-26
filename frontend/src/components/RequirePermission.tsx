@@ -4,12 +4,13 @@ import { Navigate } from "react-router-dom";
 interface RequirePermissionProps {
   path: string;
   children: React.ReactNode;
+  administrative?: boolean;
 }
 
-export function RequirePermission({ path, children }: RequirePermissionProps) {
-  const { hasPermission } = useAuth();
+export function RequirePermission({ path, children, administrative = false }: RequirePermissionProps) {
+  const { hasPermission, isAdministrator } = useAuth();
 
-  if (!hasPermission(path)) {
+  if (!hasPermission(path) || (administrative && !isAdministrator)) {
     return <Navigate to="/" replace />;
   }
 

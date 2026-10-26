@@ -3,6 +3,7 @@ from app.domain.constants.ParameterNames import EVENT_NOTIFICATION_RECIPIENTS_PA
 from app.domain.entities.RoleMenuOption import RoleMenuOption
 from app.domain.entities.MenuOption import MenuOption
 from app.domain.entities.Parameter import Parameter
+from app.domain.entities.PersonnelType import PersonnelType
 from app.domain.entities.Role import Role
 from app.infrastructure.db.connection import SessionLocal
 from sqlalchemy import func
@@ -36,6 +37,15 @@ def seedRequiredCatalogs() -> None:
             for reason in assistanceReasons
         }
         hasChanges = False
+
+        externalPersonnelType = (
+            db.query(PersonnelType)
+            .filter(func.lower(func.trim(PersonnelType.namePersonnelType)) == "externo")
+            .first()
+        )
+        if not externalPersonnelType:
+            db.add(PersonnelType(namePersonnelType="Externo"))
+            hasChanges = True
 
         for requiredReasonName in REQUIRED_ASSISTANCE_REASONS:
             normalizedName = _normalizeCatalogName(requiredReasonName)

@@ -19,8 +19,8 @@ export interface AttendancePerson {
   documentNumberAttendancePerson: string;
   positionAttendancePerson?: string | null;
   IdSolutionCenter?: number | null;
+  IdPersonnelType?: number | null;
   phoneAttendancePerson?: string | null;
-  signaturePathAttendancePerson?: string | null;
 }
 
 export interface AttendanceRegisterRequest {

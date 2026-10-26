@@ -10,8 +10,13 @@ from app.infrastructure.logging.loggerConfig import getLogger
 from app.infrastructure.db.config import settings
 from app.domain.dtos.EventDto import EventResponseDto
 from email.message import EmailMessage
+from email.utils import make_msgid
+from io import BytesIO
+from pathlib import Path
 from typing import Protocol
 from html import escape
+import os
+import qrcode
 import re
 import smtplib
 import ssl
@@ -206,10 +211,12 @@ class EventNotificationApplication(IEventNotificationApplication):
         senderName = settings.SMTP_FROM_NAME.strip()
         eventTitle = event.titleEvent.strip()
         eventUrl = (event.publicUrlEvent or "").strip()
-        solutionCenterName = self._getSolutionCenterName(event)
+        eventDate = event.dateEvent.strftime('%d/%m/%Y')
+        eventSchedule = f"{event.startTimeEvent.strftime('%H:%M')} - {event.endTimeEvent.strftime('%H:%M')}"
+        eventPlace = event.eventPlace or ""
 
         message = EmailMessage()
-        message["Subject"] = f"[ASISTENCIA][EVENTO CREADO] {eventTitle}"
+        message["Subject"] = "¡Espacio registrado exitosamente!"
         message["From"] = (
             f"{senderName} <{senderEmail}>" if senderName else senderEmail
         )
@@ -220,31 +227,31 @@ class EventNotificationApplication(IEventNotificationApplication):
         if settings.SMTP_REPLY_TO:
             message["Reply-To"] = settings.SMTP_REPLY_TO.strip()
 
-        plainUrl = eventUrl or "No disponible"
         plainBody = (
-            "Cordial saludo,\n\n"
-            "Se creó un nuevo evento en el Sistema de Registro de Asistencia.\n\n"
-            f"Centro de soluciones: {solutionCenterName}\n"
-            f"Título: {eventTitle}\n"
-            f"Fecha: {event.dateEvent.strftime('%d/%m/%Y')}\n"
-            f"Horario: {event.startTimeEvent.strftime('%H:%M')} - "
-            f"{event.endTimeEvent.strftime('%H:%M')}\n"
-            f"Duración: {event.durationEvent or 'No especificada'}\n"
-            f"Lugar: {event.eventPlace or 'No especificado'}\n"
-            f"Facilitador: {event.facilitatorNameEvent or 'No especificado'}\n"
-            f"Creado por: {event.createdByUserLogin}\n"
-            f"Enlace de asistencia: {plainUrl}\n\n"
-            "Este es un mensaje automático, por favor no responda a este correo."
+            "¡Espacio registrado exitosamente!\n\n"
+            "El espacio formativo ha sido creado y registrado correctamente en el software de capacitaciones.\n\n"
+            "Puedes consultar y realizar el seguimiento de la información, participantes y demás detalles asociados al espacio desde la plataforma.\n\n"
+            f"TEMA: {eventTitle}\n"
+            f"DÍA: {eventDate}\n"
+            f"HORA: {eventSchedule}\n"
+            f"LUGAR: {eventPlace}\n\n"
+            f"Link de asistencia y QR\n{eventUrl}"
         )
         message.set_content(plainBody)
 
         attendanceLink = (
             f'<a href="{escape(eventUrl, quote=True)}" '
-            'style="display:inline-block;padding:10px 16px;background:#4B2E1F;'
-            'color:#FFFFFF;text-decoration:none;border-radius:8px;font-weight:600;">'
-            "Abrir registro de asistencia</a>"
+            'style="color:#4B2E1F;word-break:break-all;">'
+            f"{escape(eventUrl)}</a>"
             if eventUrl
-            else "<span>No disponible</span>"
+            else ""
+        )
+        qrContentId = make_msgid() if eventUrl else None
+        qrImage = (
+            f'<img src="cid:{qrContentId[1:-1]}" alt="QR de asistencia" '
+            'width="220" style="display:block;width:100%;max-width:220px;height:auto;margin:18px auto 0;">'
+            if qrContentId
+            else ""
         )
         htmlBody = f"""
         <!doctype html>
@@ -252,44 +259,50 @@ class EventNotificationApplication(IEventNotificationApplication):
           <body style="margin:0;padding:24px;background:#F8F3EC;color:#4B2E1F;font-family:Segoe UI,Arial,sans-serif;">
             <div style="max-width:680px;margin:0 auto;background:#FFFDF8;border:1px solid #E0CDBB;border-radius:12px;overflow:hidden;">
               <div style="padding:20px 24px;background:#4B2E1F;color:#F7E8D8;">
-                <h2 style="margin:0;font-size:21px;">Nuevo evento creado</h2>
+                <h2 style="margin:0;font-size:21px;text-align:center;">¡Espacio registrado exitosamente!</h2>
               </div>
               <div style="padding:24px;">
-                <p style="margin-top:0;">Cordial saludo,</p>
-                <p>Se creó un nuevo evento en el Sistema de Registro de Asistencia.</p>
+                <p style="margin-top:0;">El espacio formativo ha sido creado y registrado correctamente en el software de capacitaciones.</p>
+                <p>Puedes consultar y realizar el seguimiento de la información, participantes y demás detalles asociados al espacio desde la plataforma.</p>
                 <table style="width:100%;border-collapse:collapse;margin:20px 0;">
-                  {self._detailRow("Centro de soluciones", solutionCenterName)}
-                  {self._detailRow("Título", eventTitle)}
-                  {self._detailRow("Fecha", event.dateEvent.strftime('%d/%m/%Y'))}
-                  {self._detailRow("Horario", f"{event.startTimeEvent.strftime('%H:%M')} - {event.endTimeEvent.strftime('%H:%M')}")}
-                  {self._detailRow("Duración", event.durationEvent or "No especificada")}
-                  {self._detailRow("Lugar", event.eventPlace or "No especificado")}
-                  {self._detailRow("Facilitador", event.facilitatorNameEvent or "No especificado")}
-                  {self._detailRow("Creado por", event.createdByUserLogin)}
+                  {self._detailRow("TEMA:", eventTitle)}
+                  {self._detailRow("DÍA:", eventDate)}
+                  {self._detailRow("HORA:", eventSchedule)}
+                  {self._detailRow("LUGAR:", eventPlace)}
                 </table>
-                <div style="margin-top:22px;">{attendanceLink}</div>
-                <p style="margin:24px 0 0;color:#7A6252;font-size:12px;">Este es un mensaje automático, por favor no responda a este correo.</p>
+                <div style="margin-top:22px;">
+                  <p style="font-weight:700;">Link de asistencia y QR</p>
+                  {attendanceLink}
+                  {qrImage}
+                </div>
               </div>
             </div>
           </body>
         </html>
         """
         message.add_alternative(htmlBody, subtype="html")
+        if qrContentId:
+            message.get_payload()[-1].add_related(
+                self._getQrImage(event, eventUrl),
+                maintype="image",
+                subtype="png",
+                cid=qrContentId,
+                disposition="inline",
+                filename="qr_asistencia.png",
+            )
         return message
 
-    def _getSolutionCenterName(self, event: EventResponseDto) -> str:
-        solutionCenter = event.solutionCenter
+    def _getQrImage(self, event: EventResponseDto, eventUrl: str) -> bytes:
+        if event.qrPathEvent:
+            qrPath = Path(os.getenv("UPLOAD_DIR", "uploads")) / "qrs" / Path(event.qrPathEvent).name
+            try:
+                return qrPath.read_bytes()
+            except OSError:
+                pass
 
-        if not solutionCenter:
-            return "No especificado"
-
-        code = solutionCenter.codeSolutionCenter.strip()
-        name = solutionCenter.nameSolutionCenter.strip()
-
-        if code and name:
-            return f"{code} - {name}"
-
-        return code or name or "No especificado"
+        imageBuffer = BytesIO()
+        qrcode.make(eventUrl).save(imageBuffer, format="PNG")
+        return imageBuffer.getvalue()
 
     def _detailRow(self, label: str, value: str) -> str:
         return (

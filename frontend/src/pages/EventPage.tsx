@@ -1,4 +1,4 @@
-import { Alert, Box, Button, Chip, CircularProgress, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, FormControlLabel, FormHelperText, IconButton, InputLabel, ListItemText, ListSubheader, MenuItem, OutlinedInput, Paper, Radio, RadioGroup, Select, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TextField, Tooltip, Typography, } from "@mui/material";
+import { Alert, Autocomplete, Box, Button, Chip, CircularProgress, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, FormControlLabel, FormHelperText, IconButton, InputLabel, ListItemText, ListSubheader, MenuItem, OutlinedInput, Paper, Radio, RadioGroup, Select, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TextField, Tooltip, Typography, } from "@mui/material";
 import type { AssistanceReason, Competency, EventCategory, SpecificTrainingProgram, } from "../models/EventCatalog";
 import { ResponseModal, type ResponseModalSeverity, } from "../components/ResponseModal";
 import { OnlyOfficeViewer } from "../components/OnlyOfficeViewer";
@@ -19,7 +19,9 @@ import type { OnlyOfficePreview } from "../models/OnlyOffice";
 import { getErrorMessage } from "../services/errorService";
 import { getBackendFileUrl } from "../services/backendFileService";
 import { eventService } from "../services/eventService";
-import { useEffect, useState } from "react";
+import { trainingParameterService } from "../services/trainingParameterService";
+import type { TrainingParameter } from "../models/TrainingParameter";
+import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import * as XLSX from "xlsx-js-style";
 
@@ -59,9 +61,12 @@ interface EventFormState {
   secondFacilitatorTypeEvent: FacilitatorType;
   secondFacilitatorCompanyEvent: string;
   secondFacilitatorPositionEvent: string;
+  thirdFacilitatorNameEvent: string;
+  thirdFacilitatorTypeEvent: FacilitatorType;
+  thirdFacilitatorCompanyEvent: string;
+  thirdFacilitatorPositionEvent: string;
   scheduledPeopleNumber: string;
   isPaidTrainingEvent: boolean | null;
-  isNewStaffInductionEvent: boolean | null;
   observationsEvent: string;
   eventPlace: string;
   topics: string[];
@@ -87,9 +92,12 @@ const emptyEventForm: EventFormState = {
   secondFacilitatorTypeEvent: "",
   secondFacilitatorCompanyEvent: "",
   secondFacilitatorPositionEvent: "",
+  thirdFacilitatorNameEvent: "",
+  thirdFacilitatorTypeEvent: "",
+  thirdFacilitatorCompanyEvent: "",
+  thirdFacilitatorPositionEvent: "",
   scheduledPeopleNumber: "",
   isPaidTrainingEvent: null,
-  isNewStaffInductionEvent: false,
   observationsEvent: "",
   eventPlace: "",
   topics: [],
@@ -105,6 +113,9 @@ const createUppercaseFields = new Set<keyof EventFormState>([
   "secondFacilitatorNameEvent",
   "secondFacilitatorCompanyEvent",
   "secondFacilitatorPositionEvent",
+  "thirdFacilitatorNameEvent",
+  "thirdFacilitatorCompanyEvent",
+  "thirdFacilitatorPositionEvent",
   "observationsEvent",
   "eventPlace",
 ]);
@@ -127,6 +138,11 @@ const onlyOfficePensumExtensions = new Set([
   "pptm",
   "pptx",
 ]);
+
+const normalizeParameterTopic = (value: string) =>
+  value.trim().replace(/\s+/g, " ").toUpperCase().normalize("NFC");
+const parameterTopicKey = (value: string) =>
+  normalizeParameterTopic(value).normalize("NFKD").replace(/\p{M}/gu, "");
 
 const getBogotaDateTime = () => {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -206,10 +222,12 @@ const calculateDuration = (startTime: string, endTime: string) => {
   return parts.join(" ");
 };
 
-const compressSignatureForExcel = async (signaturePath: string) => {
+const fetchSignature = async (signaturePath: string, signal?: AbortSignal) => {
   const signatureUrl = getBackendFileUrl(signaturePath);
   const accessToken = localStorage.getItem("accessToken");
   const response = await fetch(signatureUrl, {
+    signal,
+    cache: "no-store",
     headers: accessToken
       ? { Authorization: `Bearer ${accessToken}` }
       : undefined,
@@ -219,7 +237,11 @@ const compressSignatureForExcel = async (signaturePath: string) => {
     throw new Error("No fue posible descargar la firma.");
   }
 
-  const signatureBlob = await response.blob();
+  return response.blob();
+};
+
+const compressSignatureForExcel = async (signaturePath: string) => {
+  const signatureBlob = await fetchSignature(signaturePath);
   const objectUrl = URL.createObjectURL(signatureBlob);
 
   try {
@@ -412,13 +434,35 @@ export function EventPage() {
   const [competencies, setCompetencies] = useState<Competency[]>([]);
   const [competenciesMenuOpen, setCompetenciesMenuOpen] = useState(false);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
+  const [cancellationReason, setCancellationReason] = useState("");
   const [pensumFile, setPensumFile] = useState<File | null>(null);
   const [pensumPreviewUrl, setPensumPreviewUrl] = useState("");
   const [pensumPreviewOpen, setPensumPreviewOpen] = useState(false);
   const [onlyOfficePreview, setOnlyOfficePreview] = useState<OnlyOfficePreview | null>(null);
   const [pensumPreviewLoading, setPensumPreviewLoading] = useState(false);
   const [pensumPreviewError, setPensumPreviewError] = useState("");
+  const [trainingParameters, setTrainingParameters] = useState<TrainingParameter[]>([]);
+  const [trainingParametersLoading, setTrainingParametersLoading] = useState(false);
+  const [trainingParametersError, setTrainingParametersError] = useState("");
+  const [parameterChoice, setParameterChoice] = useState<TrainingParameter | null>(null);
+  const [selectedTrainingParameter, setSelectedTrainingParameter] = useState<TrainingParameter | null>(null);
+  const [parameterDetailLoading, setParameterDetailLoading] = useState(false);
+  const [parameterDetailError, setParameterDetailError] = useState("");
+  const [parameterToConfirm, setParameterToConfirm] = useState<TrainingParameter | null>(null);
+  const parameterListRequest = useRef(0);
+  const parameterDetailRequest = useRef(0);
+  const parameterTopicsBaseline = useRef<string[]>([]);
+  const pensumRequest = useRef(0);
   const [signatureImageUrl, setSignatureImageUrl] = useState("");
+  const signatureRequest = useRef<AbortController | null>(null);
+  const [signatureLoading, setSignatureLoading] = useState(false);
+  const [signatureError, setSignatureError] = useState("");
+
+  useEffect(() => () => {
+    if (signatureImageUrl) URL.revokeObjectURL(signatureImageUrl);
+  }, [signatureImageUrl]);
+
+  useEffect(() => () => signatureRequest.current?.abort(), []);
   const [eventStatusFilter, setEventStatusFilter] = useState("");
   const [eventModalOpen, setEventModalOpen] = useState(false);
   const [qrInfo, setQrInfo] = useState<EventQr | null>(null);
@@ -432,6 +476,15 @@ export function EventPage() {
   const [exportingExcel, setExportingExcel] = useState(false);
   const [eventRowsPerPage] = useState(10);
   const [, setError] = useState("");
+  const isParameterizedEvent = eventModalMode === "create"
+    ? parameterChoice !== null
+    : selectedEvent?.IdTrainingParameter != null;
+
+  useEffect(() => () => {
+    parameterListRequest.current += 1;
+    parameterDetailRequest.current += 1;
+    pensumRequest.current += 1;
+  }, []);
 
   const showResponseModal = (severity: ResponseModalSeverity, title: string, message: string) => {
     setResponseModal({
@@ -450,11 +503,117 @@ export function EventPage() {
   };
 
   const resetPensumPreview = () => {
+    pensumRequest.current += 1;
     setPensumPreviewOpen(false);
     setPensumPreviewUrl("");
     setOnlyOfficePreview(null);
     setPensumPreviewLoading(false);
     setPensumPreviewError("");
+  };
+
+  const resetTrainingParameter = () => {
+    parameterListRequest.current += 1;
+    parameterDetailRequest.current += 1;
+    parameterTopicsBaseline.current = [];
+    setTrainingParameters([]);
+    setTrainingParametersLoading(false);
+    setTrainingParametersError("");
+    setParameterChoice(null);
+    setSelectedTrainingParameter(null);
+    setParameterDetailLoading(false);
+    setParameterDetailError("");
+    setParameterToConfirm(null);
+  };
+
+  const loadTrainingParameters = async () => {
+    const request = ++parameterListRequest.current;
+    setTrainingParametersLoading(true);
+    setTrainingParametersError("");
+    try {
+      const response = await trainingParameterService.getAll(true);
+      if (!response.isSuccess || !response.result) {
+        throw new Error(response.Message || "No se pudieron consultar las capacitaciones.");
+      }
+      if (request === parameterListRequest.current) {
+        setTrainingParameters(response.result.filter((parameter) => parameter.isActive));
+      }
+    } catch (error) {
+      if (request === parameterListRequest.current) {
+        setTrainingParameters([]);
+        setTrainingParametersError(getErrorMessage(error));
+      }
+    } finally {
+      if (request === parameterListRequest.current) setTrainingParametersLoading(false);
+    }
+  };
+
+  const selectTrainingParameter = async (parameter: TrainingParameter, keepTitle = false) => {
+    const request = ++parameterDetailRequest.current;
+    setParameterToConfirm(null);
+    setParameterChoice(parameter);
+    setSelectedTrainingParameter(null);
+    setParameterDetailLoading(true);
+    setParameterDetailError("");
+    parameterTopicsBaseline.current = [];
+    resetPensumPreview();
+    setPensumFile(null);
+    setTopicInput("");
+    setEventForm((previous) => ({
+      ...previous, titleEvent: keepTitle ? previous.titleEvent : parameter.nameTrainingParameter, topics: [],
+    }));
+    try {
+      const response = await trainingParameterService.getById(parameter.IdTrainingParameter);
+      if (request !== parameterDetailRequest.current) return;
+      if (!response.isSuccess || !response.result) {
+        throw new Error(response.Message || "No se pudo consultar la capacitación.");
+      }
+      const detail = response.result;
+      if (detail.IdTrainingParameter !== parameter.IdTrainingParameter || !detail.isActive) {
+        throw new Error("La capacitación seleccionada ya no está activa. Elige otra o quita la parametrización.");
+      }
+      if (!detail.pensumPathTrainingParameter || !detail.pensumOriginalNameTrainingParameter
+        || !detail.pensumMimeTypeTrainingParameter || !((detail.pensumSizeTrainingParameter ?? 0) > 0)
+        || !detail.topics.length) {
+        throw new Error("La capacitación no tiene los temas y el PÉNSUM oficial necesarios.");
+      }
+      const topics = [...detail.topics]
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.IdParameterTopic - b.IdParameterTopic)
+        .map((topic) => topic.nameParameterTopic);
+      parameterTopicsBaseline.current = topics;
+      setParameterChoice(detail);
+      setSelectedTrainingParameter(detail);
+      // Keep any title personalization made while the detail was loading.
+      setEventForm((previous) => ({ ...previous, topics }));
+    } catch (error) {
+      if (request === parameterDetailRequest.current) setParameterDetailError(getErrorMessage(error));
+    } finally {
+      if (request === parameterDetailRequest.current) setParameterDetailLoading(false);
+    }
+  };
+
+  const requestTrainingParameter = (parameter: TrainingParameter) => {
+    if (saving || eventModalMode !== "create"
+      || parameter.IdTrainingParameter === parameterChoice?.IdTrainingParameter) return;
+    const editedTopics = JSON.stringify(eventForm.topics) !== JSON.stringify(parameterTopicsBaseline.current);
+    if (editedTopics || topicInput.trim() || pensumFile) {
+      setParameterToConfirm(parameter);
+      return;
+    }
+    void selectTrainingParameter(parameter);
+  };
+
+  const removeTrainingParameter = () => {
+    if (saving || eventModalMode !== "create") return;
+    parameterDetailRequest.current += 1;
+    parameterTopicsBaseline.current = [];
+    setParameterChoice(null);
+    setSelectedTrainingParameter(null);
+    setParameterDetailLoading(false);
+    setParameterDetailError("");
+    setParameterToConfirm(null);
+    resetPensumPreview();
+    setPensumFile(null);
+    // Title and final edited topics remain available for the free event.
   };
   
   const loadEvents = async (showError = true, pageToLoad = eventPage, statusToFilter = eventStatusFilter) => {
@@ -502,22 +661,34 @@ export function EventPage() {
 
   const cancelEvent = (IdEvent: number) => {
     setEventIdToCancel(IdEvent);
+    setCancellationReason("");
     setConfirmCancelOpen(true);
   };
 
   const confirmCancelEvent = async () => {
-    if (!eventIdToCancel) return;
+    if (!eventIdToCancel || loading) return;
+
+    const reason = cancellationReason.trim();
+    if (!reason) {
+      showResponseModal("warning", "Campo obligatorio", "El motivo de cancelación es obligatorio.");
+      return;
+    }
 
     try {
       setLoading(true);
-      const response = await eventService.cancel(eventIdToCancel);
+      const response = await eventService.cancel(eventIdToCancel, reason);
+      if (!response.isSuccess) {
+        throw new Error(response.Message || "No se pudo cancelar el evento.");
+      }
       setConfirmCancelOpen(false);
       setEventIdToCancel(null);
+      setCancellationReason("");
       showResponseModal("success", "Evento cancelado", response.Message || "Evento cancelado correctamente.");
       await loadEvents(false, eventPage, eventStatusFilter);
     } catch (err) {
       setConfirmCancelOpen(false);
       setEventIdToCancel(null);
+      setCancellationReason("");
       showResponseModal(
         "error",
         "Error",
@@ -533,6 +704,7 @@ export function EventPage() {
 
     setConfirmCancelOpen(false);
     setEventIdToCancel(null);
+    setCancellationReason("");
   };
 
   const showQr = async (IdEvent: number) => {
@@ -611,6 +783,13 @@ export function EventPage() {
         : event.secondFacilitatorNameEvent
           ? "INTERNO"
           : "");
+    const thirdFacilitatorTypeEvent: FacilitatorType =
+      event.thirdFacilitatorTypeEvent ??
+      (event.thirdFacilitatorCompanyEvent
+        ? "EXTERNO"
+        : event.thirdFacilitatorNameEvent
+          ? "INTERNO"
+          : "");
 
     return {
       titleEvent: event.titleEvent ?? "",
@@ -639,9 +818,16 @@ export function EventPage() {
           : "",
       secondFacilitatorPositionEvent:
         event.secondFacilitatorPositionEvent ?? "",
+      thirdFacilitatorNameEvent: event.thirdFacilitatorNameEvent ?? "",
+      thirdFacilitatorTypeEvent,
+      thirdFacilitatorCompanyEvent:
+        thirdFacilitatorTypeEvent === "EXTERNO"
+          ? event.thirdFacilitatorCompanyEvent ?? ""
+          : "",
+      thirdFacilitatorPositionEvent:
+        event.thirdFacilitatorPositionEvent ?? "",
       scheduledPeopleNumber: event.scheduledPeopleNumber?.toString() ?? "",
       isPaidTrainingEvent: event.isPaidTrainingEvent ?? false,
-      isNewStaffInductionEvent: event.isNewStaffInductionEvent ?? false,
       observationsEvent: event.observationsEvent ?? "",
       eventPlace: event.eventPlace ?? "",
       topics: event.topics?.map((topic) => topic.nameEventTopic) ?? [],
@@ -651,6 +837,7 @@ export function EventPage() {
   };
 
   const openCreateModal = () => {
+    resetTrainingParameter();
     resetPensumPreview();
     setCompetenciesMenuOpen(false);
     setSelectedEvent(null);
@@ -659,11 +846,13 @@ export function EventPage() {
     setPensumFile(null);
     setEventModalMode("create");
     setEventModalOpen(true);
+    void loadTrainingParameters();
   };
 
   const openViewModal = async (event: Event) => {
     try {
       setLoading(true);
+      resetTrainingParameter();
       resetPensumPreview();
       setCompetenciesMenuOpen(false);
       setSelectedEvent(event);
@@ -688,6 +877,7 @@ export function EventPage() {
   };
 
   const openUpdateModal = (event: Event) => {
+    resetTrainingParameter();
     resetPensumPreview();
     setCompetenciesMenuOpen(false);
     setSelectedEvent(event);
@@ -700,6 +890,7 @@ export function EventPage() {
 
   const closeEventModal = () => {
     if (saving) return;
+    resetTrainingParameter();
     resetPensumPreview();
     setCompetenciesMenuOpen(false);
     setActiveCategoryTooltipId(null);
@@ -739,11 +930,19 @@ export function EventPage() {
         nextForm.secondFacilitatorCompanyEvent = "";
       }
 
+      if (
+        field === "thirdFacilitatorTypeEvent" &&
+        normalizedValue === "INTERNO"
+      ) {
+        nextForm.thirdFacilitatorCompanyEvent = "";
+      }
+
       return nextForm;
     });
   };
 
   const addTopic = () => {
+    if (saving || parameterDetailLoading) return;
     const cleanTopic =
       eventModalMode === "create"
         ? topicInput.trim().toLocaleUpperCase("es-CO")
@@ -768,6 +967,7 @@ export function EventPage() {
   };
 
   const removeTopic = (index: number) => {
+    if (saving || parameterDetailLoading) return;
     setEventForm((prev) => ({
       ...prev,
       topics: prev.topics.filter((_, topicIndex) => topicIndex !== index),
@@ -780,6 +980,12 @@ export function EventPage() {
         eventForm.secondFacilitatorTypeEvent ||
         eventForm.secondFacilitatorCompanyEvent.trim() ||
         eventForm.secondFacilitatorPositionEvent.trim()
+    );
+    const hasThirdFacilitator = Boolean(
+      eventForm.thirdFacilitatorNameEvent.trim() ||
+        eventForm.thirdFacilitatorTypeEvent ||
+        eventForm.thirdFacilitatorCompanyEvent.trim() ||
+        eventForm.thirdFacilitatorPositionEvent.trim()
     );
 
     return {
@@ -824,11 +1030,24 @@ export function EventPage() {
       secondFacilitatorPositionEvent: hasSecondFacilitator
         ? eventForm.secondFacilitatorPositionEvent || null
         : null,
+      thirdFacilitatorNameEvent: hasThirdFacilitator
+        ? eventForm.thirdFacilitatorNameEvent || null
+        : null,
+      thirdFacilitatorTypeEvent: hasThirdFacilitator
+        ? eventForm.thirdFacilitatorTypeEvent || null
+        : null,
+      thirdFacilitatorCompanyEvent:
+        hasThirdFacilitator &&
+        eventForm.thirdFacilitatorTypeEvent === "EXTERNO"
+          ? eventForm.thirdFacilitatorCompanyEvent || null
+          : null,
+      thirdFacilitatorPositionEvent: hasThirdFacilitator
+        ? eventForm.thirdFacilitatorPositionEvent || null
+        : null,
       scheduledPeopleNumber: eventForm.scheduledPeopleNumber
         ? Number(eventForm.scheduledPeopleNumber)
         : null,
       isPaidTrainingEvent: eventForm.isPaidTrainingEvent,
-      isNewStaffInductionEvent: Boolean(eventForm.isNewStaffInductionEvent),
       observationsEvent: eventForm.observationsEvent || null,
       eventPlace: eventForm.eventPlace || null,
       topics: eventForm.topics,
@@ -837,6 +1056,13 @@ export function EventPage() {
   };
 
   const validateEventForm = () => {
+    if (eventModalMode === "create" && parameterChoice
+      && (parameterDetailLoading || parameterDetailError || !selectedTrainingParameter
+        || parameterChoice.IdTrainingParameter !== selectedTrainingParameter.IdTrainingParameter)) {
+      showResponseModal("warning", "Capacitación pendiente",
+        parameterDetailError || "Espera a que se carguen los temas y el PÉNSUM oficial.");
+      return false;
+    }
     const requiredFields = [
       { value: eventForm.titleEvent, label: "Título" },
       { value: eventForm.descriptionEvent, label: "Descripción" },
@@ -932,6 +1158,44 @@ export function EventPage() {
       return false;
     }
 
+    const hasThirdFacilitatorData = Boolean(
+      eventForm.thirdFacilitatorNameEvent.trim() ||
+        eventForm.thirdFacilitatorTypeEvent ||
+        eventForm.thirdFacilitatorCompanyEvent.trim() ||
+        eventForm.thirdFacilitatorPositionEvent.trim()
+    );
+
+    if (hasThirdFacilitatorData && !eventForm.thirdFacilitatorNameEvent.trim()) {
+      showResponseModal(
+        "warning",
+        "Tercer facilitador incompleto",
+        "Debes ingresar el nombre del tercer facilitador."
+      );
+      return false;
+    }
+
+    if (hasThirdFacilitatorData && !eventForm.thirdFacilitatorTypeEvent) {
+      showResponseModal(
+        "warning",
+        "Tercer facilitador incompleto",
+        "Debes indicar si el tercer facilitador es interno o externo."
+      );
+      return false;
+    }
+
+    if (
+      hasThirdFacilitatorData &&
+      eventForm.thirdFacilitatorTypeEvent === "EXTERNO" &&
+      !eventForm.thirdFacilitatorCompanyEvent.trim()
+    ) {
+      showResponseModal(
+        "warning",
+        "Campo obligatorio",
+        "Debes ingresar la empresa del tercer facilitador externo."
+      );
+      return false;
+    }
+
     if (eventModalMode === "create") {
       const bogotaNow = getBogotaDateTime();
       const selectedStartDateTime = `${eventForm.dateEvent}T${eventForm.startTimeEvent}`;
@@ -950,11 +1214,21 @@ export function EventPage() {
       showResponseModal("warning", "Campo obligatorio", "Debes agregar al menos un tema tratado.");
       return false;
     }
+    if (isParameterizedEvent) {
+      const topics = eventForm.topics.map(normalizeParameterTopic);
+      if (Array.from(eventForm.titleEvent.trim().toUpperCase()).length > 200
+        || topics.some((topic) => !topic || Array.from(topic).length > 300)
+        || new Set(topics.map(parameterTopicKey)).size !== topics.length) {
+        showResponseModal("warning", "Título o temas no válidos",
+          "El título admite hasta 200 caracteres. Cada tema debe tener entre 1 y 300 caracteres y no repetirse.");
+        return false;
+      }
+    }
     if (eventForm.competencies.length === 0) {
       showResponseModal("warning", "Campo obligatorio", "Debes seleccionar al menos una competencia.");
       return false;
     }
-    if (eventModalMode === "create" && !pensumFile) {
+    if (eventModalMode === "create" && !isParameterizedEvent && !pensumFile) {
       showResponseModal("warning", "Campo obligatorio", "Debes adjuntar el pensum del evento.");
       return false;
     }
@@ -967,6 +1241,7 @@ export function EventPage() {
   };
 
   const saveEvent = async () => {
+    if (saving || parameterToConfirm) return;
     try {
 
       if (!validateEventForm()) {
@@ -977,14 +1252,20 @@ export function EventPage() {
       const payload = buildEventPayload();
 
       if (eventModalMode === "create") {
-        const response = await eventService.create(payload);
+        const response = await eventService.create({
+          ...payload,
+          ...(parameterChoice ? { IdTrainingParameter: parameterChoice.IdTrainingParameter } : {}),
+        });
 
         if (!response.isSuccess || !response.result) {
           throw new Error(response.Message || "No se pudo crear el evento.");
         }
 
-        if (pensumFile) {
-          await eventService.uploadPensum(response.result.IdEvent, pensumFile);
+        if (!isParameterizedEvent && pensumFile) {
+          const uploadResponse = await eventService.uploadPensum(response.result.IdEvent, pensumFile);
+          if (!uploadResponse.isSuccess || !uploadResponse.result) {
+            throw new Error(uploadResponse.Message || "El evento se creó, pero no se pudo adjuntar el PÉNSUM.");
+          }
         }
 
         const notificationWasSent =
@@ -1011,8 +1292,11 @@ export function EventPage() {
           throw new Error(response.Message || "No se pudo actualizar el evento.");
         }
 
-        if (pensumFile) {
-          await eventService.uploadPensum(selectedEvent.IdEvent, pensumFile);
+        if (!isParameterizedEvent && pensumFile) {
+          const uploadResponse = await eventService.uploadPensum(selectedEvent.IdEvent, pensumFile);
+          if (!uploadResponse.isSuccess || !uploadResponse.result) {
+            throw new Error(uploadResponse.Message || "No se pudo adjuntar el PÉNSUM del evento.");
+          }
         }
 
         showResponseModal(
@@ -1035,18 +1319,34 @@ export function EventPage() {
     }
   };
 
-  const openSignatureModal = (signaturePath?: string | null, personName?: string | null) => {
+  const openSignatureModal = async (signaturePath?: string | null, personName?: string | null) => {
     if (!signaturePath) {
       showResponseModal("warning", "Sin firma", "Esta persona no tiene firma registrada.");
       return;
     }
 
-    setSignatureImageUrl(getBackendFileUrl(signaturePath));
+    signatureRequest.current?.abort();
+    const request = new AbortController();
+    signatureRequest.current = request;
+    setSignatureImageUrl("");
+    setSignatureError("");
+    setSignatureLoading(true);
     setSignaturePersonName(personName || "Firma registrada");
     setSignatureModalOpen(true);
+    try {
+      const blob = await fetchSignature(signaturePath, request.signal);
+      if (!request.signal.aborted) setSignatureImageUrl(URL.createObjectURL(blob));
+    } catch {
+      if (!request.signal.aborted) setSignatureError("No fue posible consultar la firma. Intenta nuevamente.");
+    } finally {
+      if (!request.signal.aborted) setSignatureLoading(false);
+    }
   };
 
   const closeSignatureModal = () => {
+    signatureRequest.current?.abort();
+    setSignatureLoading(false);
+    setSignatureError("");
     setSignatureModalOpen(false);
     setSignatureImageUrl("");
     setSignaturePersonName("");
@@ -1209,6 +1509,19 @@ export function EventPage() {
         eventForm.secondFacilitatorCompanyEvent,
         eventForm.secondFacilitatorPositionEvent,
         "Segundo facilitador",
+      ]);
+    }
+
+    if (
+      eventForm.thirdFacilitatorNameEvent ||
+      eventForm.thirdFacilitatorCompanyEvent ||
+      eventForm.thirdFacilitatorPositionEvent
+    ) {
+      addRow([
+        eventForm.thirdFacilitatorNameEvent,
+        eventForm.thirdFacilitatorCompanyEvent,
+        eventForm.thirdFacilitatorPositionEvent,
+        "Tercer facilitador",
       ]);
     }
 
@@ -1573,13 +1886,19 @@ export function EventPage() {
     await loadEvents(true, newPage, eventStatusFilter);
   };
 
-  const savedPensumPreviewUrl = selectedEvent?.pensumPathEvent
+  const draftParameterDocument = eventModalMode === "create" ? selectedTrainingParameter : null;
+  const officialPensumSize = draftParameterDocument?.pensumSizeTrainingParameter ?? selectedEvent?.pensumSizeEvent;
+  const savedPensumIsGcs = selectedEvent?.pensumPathEvent?.startsWith("gs://") ?? false;
+  const savedPensumPreviewUrl = selectedEvent?.pensumPathEvent && !savedPensumIsGcs
     ? getBackendFileUrl(selectedEvent.pensumPathEvent)
     : "";
   const activePensumPreviewUrl = pensumPreviewUrl || savedPensumPreviewUrl;
   const activePensumPreviewName =
-    pensumFile?.name || selectedEvent?.pensumOriginalNameEvent || "Pensum adjunto";
+    draftParameterDocument?.pensumOriginalNameTrainingParameter ||
+    pensumFile?.name || selectedEvent?.pensumOriginalNameEvent ||
+    (parameterChoice ? "PÉNSUM oficial pendiente de consulta" : "Pensum adjunto");
   const activePensumPreviewMimeType =
+    draftParameterDocument?.pensumMimeTypeTrainingParameter ||
     pensumFile?.type || selectedEvent?.pensumMimeTypeEvent || "";
   const activePensumPreviewExtension = activePensumPreviewName
     .split(".")
@@ -1591,12 +1910,12 @@ export function EventPage() {
   const pensumPreviewIsPdf =
     activePensumPreviewMimeType === "application/pdf" ||
     activePensumPreviewExtension === "pdf";
-  const pensumPreviewUsesOnlyOffice = onlyOfficePensumExtensions.has(
+  const pensumPreviewUsesOnlyOffice = !draftParameterDocument && onlyOfficePensumExtensions.has(
     activePensumPreviewExtension ?? ""
   );
 
   const openPensumPreview = async () => {
-    if (!activePensumPreviewUrl && !pensumFile) {
+    if (!draftParameterDocument && !selectedEvent?.pensumPathEvent && !pensumFile) {
       showResponseModal(
         "warning",
         "PENSUM no disponible",
@@ -1607,18 +1926,42 @@ export function EventPage() {
 
     setPensumPreviewOpen(true);
     setPensumPreviewError("");
+    const request = ++pensumRequest.current;
 
-    if (!pensumPreviewUsesOnlyOffice || onlyOfficePreview) {
+    if (!draftParameterDocument && ((!pensumPreviewUsesOnlyOffice && (pensumFile || !savedPensumIsGcs)) || onlyOfficePreview)) {
       return;
     }
 
     try {
+      // There is no parameter-specific OnlyOffice endpoint before the event exists.
+      // Use this same dialog for authorized PDF/images, and its download fallback for Office files.
+      if (draftParameterDocument && !pensumPreviewIsPdf && !pensumPreviewIsImage) return;
       setPensumPreviewLoading(true);
+      if (draftParameterDocument) {
+        setPensumPreviewUrl("");
+        const access = await trainingParameterService.getPensumAccess(draftParameterDocument.IdTrainingParameter);
+        if (request !== pensumRequest.current) return;
+        if (!access.isSuccess || !access.result || new URL(access.result).protocol !== "https:") {
+          throw new Error(access.Message || "No fue posible obtener acceso al PÉNSUM oficial.");
+        }
+        setPensumPreviewUrl(access.result);
+        return;
+      }
+      if (!pensumPreviewUsesOnlyOffice && selectedEvent) {
+        const access = await eventService.getPensumAccess(selectedEvent.IdEvent);
+        if (request !== pensumRequest.current) return;
+        if (!access.isSuccess || !access.result) {
+          throw new Error("No fue posible obtener acceso al PENSUM.");
+        }
+        setPensumPreviewUrl(getBackendFileUrl(access.result));
+        return;
+      }
       const response = pensumFile
         ? await eventService.createPensumPreview(pensumFile)
         : selectedEvent
         ? await eventService.getPensumPreview(selectedEvent.IdEvent)
         : null;
+      if (request !== pensumRequest.current) return;
 
       if (!response?.isSuccess || !response.result) {
         throw new Error(
@@ -1626,16 +1969,59 @@ export function EventPage() {
         );
       }
 
+      if (
+        !response.result.config ||
+        typeof response.result.config !== "object" ||
+        Array.isArray(response.result.config) ||
+        typeof response.result.documentServerUrl !== "string" ||
+        !response.result.documentServerUrl.trim()
+      ) {
+        throw new Error("La respuesta de previsualización del PENSUM no es válida.");
+      }
+
       setOnlyOfficePreview(response.result);
     } catch (error) {
-      setPensumPreviewError(getErrorMessage(error));
+      if (request === pensumRequest.current) setPensumPreviewError(getErrorMessage(error));
     } finally {
-      setPensumPreviewLoading(false);
+      if (request === pensumRequest.current) setPensumPreviewLoading(false);
+    }
+  };
+
+  const downloadPensum = async () => {
+    const request = pensumRequest.current;
+    try {
+      let url = activePensumPreviewUrl;
+      if (draftParameterDocument) {
+        const access = await trainingParameterService.getPensumAccess(draftParameterDocument.IdTrainingParameter, true);
+        if (!access.isSuccess || !access.result || new URL(access.result).protocol !== "https:") {
+          throw new Error(access.Message || "No fue posible obtener acceso al PÉNSUM oficial.");
+        }
+        url = access.result;
+      } else if (!pensumFile && selectedEvent && savedPensumIsGcs) {
+        const access = await eventService.getPensumAccess(selectedEvent.IdEvent, true);
+        if (!access.isSuccess || !access.result) {
+          throw new Error("No fue posible obtener acceso al PENSUM.");
+        }
+        url = getBackendFileUrl(access.result);
+      }
+      if (!url || request !== pensumRequest.current) return;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = activePensumPreviewName;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      if (request === pensumRequest.current) setPensumPreviewError(getErrorMessage(error));
     }
   };
 
   const closePensumPreview = () => {
+    pensumRequest.current += 1;
     setPensumPreviewOpen(false);
+    if (draftParameterDocument) setPensumPreviewUrl("");
     setOnlyOfficePreview(null);
     setPensumPreviewError("");
     setPensumPreviewLoading(false);
@@ -1643,7 +2029,7 @@ export function EventPage() {
 
   useEffect(() => {
     return () => {
-      if (pensumPreviewUrl) {
+      if (pensumPreviewUrl.startsWith("blob:")) {
         window.URL.revokeObjectURL(pensumPreviewUrl);
       }
     };
@@ -1782,7 +2168,13 @@ export function EventPage() {
                       <TableCell>{item.dateEvent}</TableCell>
                       <TableCell>{item.startTimeEvent} - {item.endTimeEvent}</TableCell>
                       <TableCell>{item.eventPlace}</TableCell>
-                      <TableCell>{getTrainingTypeName(item.isPaidTrainingEvent)}</TableCell>
+                      <TableCell>
+                        {item.isPaidTrainingEvent === true
+                          ? "Programado por fuera del horario laboral"
+                          : item.isPaidTrainingEvent === false
+                          ? "Dentro del horario laboral"
+                          : getTrainingTypeName(item.isPaidTrainingEvent)}
+                      </TableCell>
                       <TableCell>{item.createdByUserLogin}</TableCell>
                       <TableCell>
                         {item.attendedPeopleNumber ?? 0}
@@ -1969,16 +2361,76 @@ export function EventPage() {
               )
             }
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr", }, gap: 2,}}>
-              <TextField
-                required
-                label="Título"
-                value={eventForm.titleEvent}
-                disabled={ eventModalMode === "view" || saving }
-                fullWidth
-                onChange={(event) =>
-                    handleEventFormChange("titleEvent", event.target.value)
-                }
-              />
+              <Box>
+                {eventModalMode === "create" ? (
+                  <Autocomplete<TrainingParameter, false, false, true>
+                    freeSolo
+                    openOnFocus
+                    autoSelect={false}
+                    clearOnBlur={false}
+                    options={trainingParameters}
+                    value={parameterChoice}
+                    inputValue={eventForm.titleEvent}
+                    disabled={saving}
+                    loading={trainingParametersLoading}
+                    loadingText="Cargando capacitaciones..."
+                    noOptionsText="Puedes escribir un título libre."
+                    getOptionLabel={(option) => typeof option === "string" ? option : option.nameTrainingParameter}
+                    isOptionEqualToValue={(option, value) =>
+                      typeof value !== "string" && option.IdTrainingParameter === value.IdTrainingParameter}
+                    onInputChange={(_, value, reason) => {
+                      if (reason === "input" || reason === "clear") handleEventFormChange("titleEvent", value);
+                    }}
+                    onChange={(_, value) => {
+                      if (value && typeof value !== "string") requestTrainingParameter(value);
+                    }}
+                    renderInput={(params) => (
+                      <TextField {...params} required label="Título" fullWidth
+                        helperText="Escribe un título libre o selecciona una capacitación. Puedes personalizar el título." />
+                    )}
+                  />
+                ) : (
+                  <TextField required label="Título" value={eventForm.titleEvent}
+                    disabled={eventModalMode === "view" || saving} fullWidth
+                    onChange={(event) => handleEventFormChange("titleEvent", event.target.value)} />
+                )}
+                {eventModalMode === "create" && parameterChoice && (
+                  <Stack spacing={0.5} sx={{ mt: 1 }}>
+                    <Typography variant="body2" sx={{ color: "#7A6252", overflowWrap: "anywhere" }}>
+                      Capacitación seleccionada: {parameterChoice.nameTrainingParameter} (ID {parameterChoice.IdTrainingParameter}).
+                      {" "}La asociación se conserva al editar el título.
+                    </Typography>
+                    <Button size="small" disabled={saving} onClick={removeTrainingParameter} sx={{ alignSelf: "flex-start" }}>
+                      Quitar parametrización
+                    </Button>
+                    <Typography variant="caption" color="text.secondary">
+                      Al quitarla, conservarás el título y los temas y deberás adjuntar un PÉNSUM manual.
+                    </Typography>
+                  </Stack>
+                )}
+                {eventModalMode !== "create" && isParameterizedEvent && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    Evento parametrizado · Capacitación ID {selectedEvent?.IdTrainingParameter}.
+                    {" "}Esta asociación no se puede cambiar ni retirar.
+                  </Typography>
+                )}
+                {eventModalMode === "create" && trainingParametersError && (
+                  <Alert severity="warning" sx={{ mt: 1 }}
+                    action={<Button size="small" disabled={saving || trainingParametersLoading}
+                      onClick={() => void loadTrainingParameters()}>Reintentar</Button>}>
+                    No se pudieron cargar las sugerencias. Puedes crear un evento libre. {trainingParametersError}
+                  </Alert>
+                )}
+                {parameterDetailLoading && <Typography role="status" variant="body2" sx={{ mt: 1 }}>
+                  Cargando temas y PÉNSUM oficial...
+                </Typography>}
+                {parameterDetailError && (
+                  <Alert severity="error" sx={{ mt: 1 }}
+                    action={<Button size="small" disabled={saving} onClick={() => {
+                      if (parameterChoice) void selectTrainingParameter(parameterChoice, true);
+                    }}>Reintentar</Button>}>{parameterDetailError}</Alert>
+                )}
+              </Box>
               <TextField
                 required
                 label="Fecha"
@@ -2324,6 +2776,96 @@ export function EventPage() {
                   </Box>
                 </Box>
               )}
+              {(eventModalMode !== "view" ||
+                eventForm.thirdFacilitatorNameEvent ||
+                eventForm.thirdFacilitatorCompanyEvent ||
+                eventForm.thirdFacilitatorPositionEvent) && (
+                <Box
+                  sx={{
+                    gridColumn: "1 / -1",
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 2,
+                    p: 2,
+                  }}
+                >
+                  <Typography
+                    sx={{ color: "primary.main", fontWeight: 700, mb: 2 }}
+                  >
+                    Tercer facilitador (opcional)
+                  </Typography>
+                  <Box
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                      gap: 2,
+                    }}
+                  >
+                    <TextField
+                      label="Nombre tercer facilitador"
+                      value={eventForm.thirdFacilitatorNameEvent}
+                      disabled={eventModalMode === "view" || saving}
+                      fullWidth
+                      onChange={(event) =>
+                        handleEventFormChange(
+                          "thirdFacilitatorNameEvent",
+                          event.target.value
+                        )
+                      }
+                    />
+                    <FormControl
+                      fullWidth
+                      required={Boolean(eventForm.thirdFacilitatorNameEvent)}
+                      disabled={eventModalMode === "view" || saving}
+                    >
+                      <InputLabel>Tipo de tercer facilitador</InputLabel>
+                      <Select
+                        label="Tipo de tercer facilitador"
+                        value={eventForm.thirdFacilitatorTypeEvent}
+                        onChange={(event) =>
+                          handleEventFormChange(
+                            "thirdFacilitatorTypeEvent",
+                            event.target.value
+                          )
+                        }
+                      >
+                        <MenuItem value="">
+                          <em>Seleccione</em>
+                        </MenuItem>
+                        <MenuItem value="INTERNO">INTERNO</MenuItem>
+                        <MenuItem value="EXTERNO">EXTERNO</MenuItem>
+                      </Select>
+                    </FormControl>
+                    {eventForm.thirdFacilitatorTypeEvent === "EXTERNO" && (
+                      <TextField
+                        required
+                        label="Empresa del tercer facilitador"
+                        value={eventForm.thirdFacilitatorCompanyEvent}
+                        disabled={eventModalMode === "view" || saving}
+                        fullWidth
+                        onChange={(event) =>
+                          handleEventFormChange(
+                            "thirdFacilitatorCompanyEvent",
+                            event.target.value
+                          )
+                        }
+                      />
+                    )}
+                    <TextField
+                      label="Cargo tercer facilitador"
+                      value={eventForm.thirdFacilitatorPositionEvent}
+                      disabled={eventModalMode === "view" || saving}
+                      fullWidth
+                      onChange={(event) =>
+                        handleEventFormChange(
+                          "thirdFacilitatorPositionEvent",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </Box>
+                </Box>
+              )}
               <TextField
                 required
                 label="Personas programadas"
@@ -2340,9 +2882,19 @@ export function EventPage() {
                   }
                 }}
               />
-              <FormControl required disabled={eventModalMode === "view" || saving}>
+              <FormControl
+                required
+                disabled={eventModalMode === "view" || saving}
+                sx={{ gridColumn: "1 / -1", minWidth: 0 }}
+              >
                 <RadioGroup
-                  row
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" },
+                    gap: 1,
+                    "& .MuiFormControlLabel-root": { m: 0, minWidth: 0 },
+                    "& .MuiFormControlLabel-label": { whiteSpace: "normal", overflowWrap: "anywhere" },
+                  }}
                   value={
                     eventForm.isPaidTrainingEvent === null
                       ? ""
@@ -2384,25 +2936,10 @@ export function EventPage() {
                         }}
                       />
                     }
-                    label="Evento pago"
+                    label="Programado por fuera del horario laboral"
                   />
                 </RadioGroup>
               </FormControl>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={Boolean(eventForm.isNewStaffInductionEvent)}
-                    onChange={(event) =>
-                      setEventForm((prev) => ({
-                        ...prev,
-                        isNewStaffInductionEvent: event.target.checked,
-                      }))
-                    }
-                    disabled={eventModalMode === "view"}
-                    sx={{ color: "#8B6A55", "&.Mui-checked": { color: "#4B2E1F", },}}/>
-                }
-                label="Inducción a personal nuevo"
-              />
             </Box>
             <TextField
               required
@@ -2436,7 +2973,7 @@ export function EventPage() {
                   <TextField
                     label="Escribe un tema"
                     value={topicInput}
-                    disabled={saving}
+                    disabled={saving || parameterDetailLoading}
                     fullWidth
                     onChange={(event) =>
                       setTopicInput(
@@ -2455,7 +2992,7 @@ export function EventPage() {
                   <Button
                     variant="outlined"
                     onClick={addTopic}
-                    disabled={saving}
+                    disabled={saving || parameterDetailLoading}
                     sx={{ minWidth: 120, borderColor: "#8B6A55", color: "#4B2E1F", "&:hover": { borderColor: "#4B2E1F", bgcolor: "rgba(75, 46, 31, 0.05)", },}}
                   >
                     Agregar
@@ -2492,9 +3029,22 @@ export function EventPage() {
                       </TableRow>
                     ) : (
                       eventForm.topics.map((topic, index) => (
-                        <TableRow key={`${topic}-${index}`} hover>
+                        <TableRow key={index} hover>
                           <TableCell>{index + 1}</TableCell>
-                          <TableCell>{topic}</TableCell>
+                          <TableCell>
+                            {isParameterizedEvent && eventModalMode !== "view" ? (
+                              <TextField size="small" fullWidth label={`Tema ${index + 1}`} value={topic}
+                                disabled={saving || parameterDetailLoading}
+                                slotProps={{ htmlInput: { maxLength: 300 } }}
+                                onChange={(event) => {
+                                  const name = eventModalMode === "create"
+                                    ? event.target.value.toLocaleUpperCase("es-CO") : event.target.value;
+                                  setEventForm((previous) => ({
+                                    ...previous, topics: previous.topics.map((item, position) => position === index ? name : item),
+                                  }));
+                                }} />
+                            ) : topic}
+                          </TableCell>
                           {eventModalMode !== "view" && (
                             <TableCell align="center">
                               <Tooltip title="Eliminar tema">
@@ -2502,7 +3052,7 @@ export function EventPage() {
                                   <IconButton
                                     size="small"
                                     onClick={() => removeTopic(index)}
-                                    disabled={saving}
+                                    disabled={saving || parameterDetailLoading}
                                     sx={{ color: "#C62828" }}
                                   >
                                     <DeleteOutlineOutlinedIcon fontSize="small" />
@@ -2634,7 +3184,30 @@ export function EventPage() {
                 )}
               </Typography>
 
-              {eventModalMode === "view" ? (
+              {isParameterizedEvent ? (
+                <Stack spacing={1}>
+                  {parameterDetailLoading ? <CircularProgress size={24} aria-label="Cargando PÉNSUM oficial" /> : (
+                    <Typography sx={{ color: "#7A6252", overflowWrap: "anywhere" }}>
+                      {activePensumPreviewName}
+                    </Typography>
+                  )}
+                  <Typography variant="body2" color="text.secondary">
+                    {activePensumPreviewMimeType || "Formato pendiente"}
+                    {officialPensumSize != null && ` · ${(officialPensumSize / 1024).toFixed(1)} KB`}
+                  </Typography>
+                  <Alert severity="info">
+                    {eventModalMode === "create"
+                      ? "Se utilizará el PÉNSUM oficial de la capacitación seleccionada."
+                      : "Se conserva el PÉNSUM oficial utilizado al crear este evento."}
+                    {" "}No admite carga manual ni reemplazo.
+                  </Alert>
+                  <Button variant="outlined" sx={{ alignSelf: "flex-start" }}
+                    disabled={saving || parameterDetailLoading || (!draftParameterDocument && !selectedEvent?.pensumPathEvent)}
+                    onClick={() => void openPensumPreview()}>
+                    Consultar PÉNSUM
+                  </Button>
+                </Stack>
+              ) : eventModalMode === "view" ? (
                 selectedEvent?.pensumPathEvent ? (
                   <Stack
                     sx={{
@@ -2689,7 +3262,9 @@ export function EventPage() {
                       type="file"
                       accept=".pdf,.doc,.docm,.docx,.odt,.rtf,.txt,.csv,.ods,.xls,.xlsb,.xlsm,.xlsx,.odp,.ppt,.pptm,.pptx,.png,.jpg,.jpeg"
                       onChange={(event) => {
+                        if (isParameterizedEvent) return;
                         const file = event.target.files?.[0] ?? null;
+                        resetPensumPreview();
                         setPensumFile(file);
                         setPensumPreviewOpen(false);
                         setOnlyOfficePreview(null);
@@ -2830,7 +3405,8 @@ export function EventPage() {
                 <Button
                 variant="contained"
                 onClick={saveEvent}
-                disabled={saving}
+                disabled={saving || parameterDetailLoading || Boolean(parameterToConfirm)
+                  || (eventModalMode === "create" && Boolean(parameterChoice) && !selectedTrainingParameter)}
                 sx={{ bgcolor: "#4B2E1F", "&:hover": { bgcolor: "#3A2318", },}}>
                 { saving
                     ? "Guardando..."
@@ -2840,6 +3416,22 @@ export function EventPage() {
                 </Button>
             )
           }
+        </DialogActions>
+      </Dialog>
+      <Dialog open={Boolean(parameterToConfirm)} onClose={() => setParameterToConfirm(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>¿Cambiar la capacitación seleccionada?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Al seleccionar {parameterToConfirm?.nameTrainingParameter}, sus temas reemplazarán los actuales,
+            incluido cualquier tema pendiente de agregar. También se descartará el archivo manual seleccionado.
+            Los demás datos del evento se conservarán.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setParameterToConfirm(null)}>Conservar datos actuales</Button>
+          <Button variant="contained" onClick={() => {
+            if (parameterToConfirm) void selectTrainingParameter(parameterToConfirm);
+          }}>Seleccionar capacitación</Button>
         </DialogActions>
       </Dialog>
       <Dialog
@@ -2867,7 +3459,14 @@ export function EventPage() {
             {activePensumPreviewName}
           </Typography>
 
-          {pensumPreviewIsImage ? (
+          {pensumPreviewLoading ? (
+            <Stack sx={{ height: "65vh", alignItems: "center", justifyContent: "center", gap: 1.5 }}>
+              <CircularProgress sx={{ color: "#4B2E1F" }} />
+              <Typography sx={{ color: "#7A6252" }}>Cargando vista previa...</Typography>
+            </Stack>
+          ) : pensumPreviewError ? (
+            <Alert severity="error">{pensumPreviewError}</Alert>
+          ) : pensumPreviewIsImage ? (
             <Box
               component="img"
               src={activePensumPreviewUrl}
@@ -2893,25 +3492,7 @@ export function EventPage() {
               }}
             />
           ) : pensumPreviewUsesOnlyOffice ? (
-            pensumPreviewLoading ? (
-              <Stack
-                sx={{
-                  height: "65vh",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 1.5,
-                }}
-              >
-                <CircularProgress sx={{ color: "#4B2E1F" }} />
-                <Typography sx={{ color: "#7A6252" }}>
-                  Cargando el visor de OnlyOffice...
-                </Typography>
-              </Stack>
-            ) : pensumPreviewError ? (
-              <Alert severity="error">
-                {pensumPreviewError}
-              </Alert>
-            ) : onlyOfficePreview ? (
+            onlyOfficePreview ? (
               <OnlyOfficeViewer
                 key={onlyOfficePreview.config.token}
                 documentServerUrl={onlyOfficePreview.documentServerUrl}
@@ -2928,15 +3509,14 @@ export function EventPage() {
                 Formato sin vista previa
               </Typography>
               <Typography sx={{ color: "#7A6252", mb: 3 }}>
-                Este formato no es compatible con el visor integrado. Puedes
-                abrirlo con una aplicación disponible en tu equipo.
+                {draftParameterDocument
+                  ? "Antes de guardar el evento, descarga este documento para abrirlo en una aplicación compatible. Una vez creado, podrás consultarlo con el visor habitual del evento."
+                  : "Este formato no es compatible con el visor integrado. Puedes abrirlo con una aplicación disponible en tu equipo."}
               </Typography>
               <Button
                 variant="contained"
-                onClick={() =>
-                  window.open(activePensumPreviewUrl, "_blank", "noopener,noreferrer")
-                }
-                disabled={!activePensumPreviewUrl}
+                onClick={() => void downloadPensum()}
+                disabled={!activePensumPreviewUrl && !savedPensumIsGcs && !draftParameterDocument}
                 sx={{
                   bgcolor: "#4B2E1F",
                   "&:hover": { bgcolor: "#3A2318" },
@@ -2948,6 +3528,13 @@ export function EventPage() {
           )}
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button
+            onClick={() => void downloadPensum()}
+            disabled={pensumPreviewLoading || (!activePensumPreviewUrl && !savedPensumIsGcs && !draftParameterDocument)}
+            sx={{ color: "#4B2E1F" }}
+          >
+            Descargar
+          </Button>
           <Button
             onClick={closePensumPreview}
             sx={{ color: "#4B2E1F" }}
@@ -2967,12 +3554,24 @@ export function EventPage() {
           <Typography sx={{ color: "#7A6252", mt: 1 }}>
             Esta acción dejará el evento en estado cancelado y el enlace de asistencia ya no estará disponible.
           </Typography>
+          <TextField
+            label="Motivo de cancelación"
+            value={cancellationReason}
+            onChange={(event) => setCancellationReason(event.target.value)}
+            required
+            multiline
+            minRows={3}
+            fullWidth
+            autoFocus
+            disabled={loading}
+            sx={{ mt: 2 }}
+          />
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2 }}>
           <Button onClick={ closeConfirmCancelModal } disabled={ loading } sx={{ color: "#4B2E1F" }}>
             No, volver
           </Button>
-          <Button variant="contained" color="error" onClick={ confirmCancelEvent } disabled={ loading } sx={{ bgcolor: "#4B2E1F", "&:hover": { bgcolor: "#3A2318", },}}>
+          <Button variant="contained" color="error" onClick={ confirmCancelEvent } disabled={ loading || !cancellationReason.trim() } sx={{ bgcolor: "#4B2E1F", "&:hover": { bgcolor: "#3A2318", },}}>
             {loading ? "Cancelando..." : "Sí, cancelar"}
           </Button>
         </DialogActions>
@@ -2982,14 +3581,6 @@ export function EventPage() {
           QR del evento
         </DialogTitle>
         <DialogContent dividers sx={{ textAlign: "center" }}>
-          <Alert
-            severity="warning"
-            variant="outlined"
-            sx={{ mb: 2, textAlign: "left" }}
-          >
-            Recuerda validar que el número de personas asistentes sea igual al
-            número registrado.
-          </Alert>
           {qrInfo?.qrPathEvent ? (
             <Box>
               <Box component="img" src={ getBackendFileUrl(qrInfo.qrPathEvent) } alt="QR del evento" sx={{ width: 220, height: 220, objectFit: "contain", mb: 2, }}/>
@@ -3056,10 +3647,10 @@ export function EventPage() {
           <Typography sx={{ color: "#4B2E1F", fontWeight: 700, mb: 2 }}>
             {signaturePersonName}
           </Typography>
-          {signatureImageUrl ? (
+          {signatureLoading ? <CircularProgress size={28} /> : signatureImageUrl ? (
             <Box
               component="img"
-              src={`${signatureImageUrl}?v=${Date.now()}`}
+              src={signatureImageUrl}
               alt="Firma del asistente"
               sx={{
                 width: "100%",
@@ -3074,7 +3665,7 @@ export function EventPage() {
             />
           ) : (
             <Typography sx={{ color: "#7A6252" }}>
-              No se encontró firma registrada.
+              {signatureError || "No se encontró firma registrada."}
             </Typography>
           )}
         </DialogContent>

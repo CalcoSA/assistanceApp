@@ -1,4 +1,4 @@
-from app.domain.dtos.EventDto import (EventCreateDto, EventUpdateDto, EventResponseDto, EventQrResponseDto, EventAttendanceResponseDto, EventPaginatedResponseDto)
+from app.domain.dtos.EventDto import (EventCreateDto, EventUpdateDto, EventCancelDto, EventResponseDto, EventQrResponseDto, EventAttendanceResponseDto, EventPaginatedResponseDto)
 from app.infrastructure.repositories.EventRepository import EventRepository
 from app.infrastructure.repositories.ParameterRepository import ParameterRepository
 from app.infrastructure.repositories.WordpressUserRepository import WordpressUserRepository
@@ -6,17 +6,15 @@ from app.application.interfaces.IEventApplication import IEventApplication
 from app.application.services.EventApplication import EventApplication
 from app.application.services.EventNotificationApplication import EventNotificationApplication
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from app.infrastructure.logging.loggerConfig import getLogger
 from app.infrastructure.db.wordpressConnection import getWordpressDb
 from app.application.services.JwtService import JwtService
 from app.domain.dtos.ApiResponseDto import apiResponseDto
 from app.infrastructure.db.connection import getDb
-from fastapi.responses import FileResponse
 from fastapi import UploadFile, File, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pathlib import Path
 
 router = APIRouter(prefix="/events", tags=["events"])
 security = HTTPBearer()
@@ -85,6 +83,27 @@ def getEventAttendances(IdEvent: int, authContext: dict = Depends(getCurrentAuth
         logger.exception("Error consultando asistentes del evento | IdEvent=%s", IdEvent)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al consultar los asistentes del evento.")
     
+@router.get("/{IdEvent}/attendances/{IdAttendance}/signature")
+def getAttendanceSignature(
+    IdEvent: int, IdAttendance: int,
+    authContext: dict = Depends(getCurrentAuthContext),
+    service: IEventApplication = Depends(getEventApplication),
+):
+    try:
+        content = service.getAttendanceSignatureByUserScope(
+            IdEvent, IdAttendance, authContext["userLogin"], authContext["roles"],
+        )
+        return Response(content=content, media_type="image/png", headers={
+            "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+        })
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from None
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(status_code=404, detail="No se encontró la firma registrada.") from None
+    except Exception:
+        logger.warning("No fue posible consultar la firma | IdAttendance=%s", IdAttendance)
+        raise HTTPException(status_code=503, detail="No fue posible consultar la firma.") from None
+
 @router.get("/", response_model=apiResponseDto[EventPaginatedResponseDto])
 def getEvents(page: int = Query(1, ge=1), pageSize: int = Query(10, ge=1, le=100), statusFilter: Optional[str] = Query(None), authContext: dict = Depends(getCurrentAuthContext), service: IEventApplication = Depends(getEventApplication),):
     try:
@@ -137,10 +156,10 @@ def updateEvent(IdEvent: int, eventData: EventUpdateDto, authContext: dict = Dep
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al actualizar el evento.")
 
 @router.patch("/{IdEvent}/cancel", response_model=apiResponseDto[EventResponseDto])
-def cancelEvent(IdEvent: int, authContext: dict = Depends(getCurrentAuthContext), service: IEventApplication = Depends(getEventApplication)):
+def cancelEvent(IdEvent: int, eventData: EventCancelDto, authContext: dict = Depends(getCurrentAuthContext), service: IEventApplication = Depends(getEventApplication)):
     try:
         logger.info("Cancelando evento | IdEvent=%s | userLogin=%s", IdEvent, authContext["userLogin"])
-        data = service.cancel(IdEvent, authContext["userLogin"], authContext["roles"])
+        data = service.cancel(IdEvent, eventData, authContext["userLogin"], authContext["roles"])
         return apiResponseDto(isSuccess=True, Message="Evento cancelado correctamente.", result=data)
 
     except PermissionError as e:
@@ -212,24 +231,36 @@ def uploadEventPensum(IdEvent: int, file: UploadFile = File(...), authContext: d
     except Exception:
         logger.exception("Error actualizando pensum | IdEvent=%s", IdEvent)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al actualizar el pensum del evento.")
+
+
+@router.get("/{IdEvent}/pensum/access", response_model=apiResponseDto[str])
+def getEventPensumAccess(
+    IdEvent: int, response: Response, download: bool = False,
+    authContext: dict = Depends(getCurrentAuthContext),
+    service: IEventApplication = Depends(getEventApplication),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        url = service.getPensumReadUrl(
+            IdEvent, authContext["userLogin"], authContext["roles"], download=download,
+        )
+        return apiResponseDto(isSuccess=True, Message="Acceso al pensum autorizado.", result=url)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from None
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from None
+    except Exception:
+        logger.error("No fue posible obtener acceso al Pensum | IdEvent=%s", IdEvent)
+        raise HTTPException(status_code=503, detail="No fue posible acceder al pensum.") from None
     
 @router.get("/{IdEvent}/qr/download")
 def downloadEventQr(IdEvent: int, authContext: dict = Depends(getCurrentAuthContext), service: IEventApplication = Depends(getEventApplication)):
     try:
-        qrInfo = service.getQrInfo(IdEvent, authContext["userLogin"], authContext["roles"])
-
-        if not qrInfo.qrPathEvent:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El evento no tiene imagen QR generada.")
-
-        backendDir = Path(__file__).resolve().parents[2]
-        relativePath = qrInfo.qrPathEvent.lstrip("/")
-
-        filePath = backendDir / relativePath
-
-        if not filePath.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se encontró la imagen QR en el servidor.")
-
-        return FileResponse(path=str(filePath), media_type="image/png", filename=f"qr_evento_{IdEvent}.png")
+        content = service.getQrImage(IdEvent, authContext["userLogin"], authContext["roles"])
+        return Response(content=content, media_type="image/png", headers={
+            "Content-Disposition": f'attachment; filename="qr_evento_{IdEvent}.png"',
+            "Cache-Control": "private, no-store",
+        })
 
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
