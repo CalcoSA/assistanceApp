@@ -15,6 +15,7 @@ export interface EventCompetency {
 
 export interface Event {
   IdEvent: number;
+  IdTrainingParameter?: number | null;
   titleEvent: string;
   descriptionEvent?: string | null;
   dateEvent: string;
@@ -36,6 +37,10 @@ export interface Event {
   secondFacilitatorTypeEvent?: "INTERNO" | "EXTERNO" | null;
   secondFacilitatorCompanyEvent?: string | null;
   secondFacilitatorPositionEvent?: string | null;
+  thirdFacilitatorNameEvent?: string | null;
+  thirdFacilitatorTypeEvent?: "INTERNO" | "EXTERNO" | null;
+  thirdFacilitatorCompanyEvent?: string | null;
+  thirdFacilitatorPositionEvent?: string | null;
   scheduledPeopleNumber?: number | null;
   attendedPeopleNumber?: number | null;
   observationsEvent?: string | null;
@@ -62,6 +67,7 @@ export interface Event {
 }
 
 export interface EventCreateRequest {
+  IdTrainingParameter?: number | null;
   titleEvent: string;
   descriptionEvent?: string | null;
   dateEvent: string;
@@ -80,6 +86,10 @@ export interface EventCreateRequest {
   secondFacilitatorTypeEvent?: "INTERNO" | "EXTERNO" | null;
   secondFacilitatorCompanyEvent?: string | null;
   secondFacilitatorPositionEvent?: string | null;
+  thirdFacilitatorNameEvent?: string | null;
+  thirdFacilitatorTypeEvent?: "INTERNO" | "EXTERNO" | null;
+  thirdFacilitatorCompanyEvent?: string | null;
+  thirdFacilitatorPositionEvent?: string | null;
   scheduledPeopleNumber?: number | null;
   isPaidTrainingEvent: boolean | null;
   isNewStaffInductionEvent?: boolean;
@@ -88,6 +98,8 @@ export interface EventCreateRequest {
   topics: string[];
   competencies: number[];
 }
+
+export type EventUpdateRequest = Partial<Omit<EventCreateRequest, "IdTrainingParameter">>;
 
 export interface EventQr {
   IdEvent: number;

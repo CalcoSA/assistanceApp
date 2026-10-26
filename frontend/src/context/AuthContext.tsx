@@ -13,6 +13,7 @@ interface AuthContextValue {
   token: string | null;
   loadingAuth: boolean;
   isAuthenticated: boolean;
+  isAdministrator: boolean;
   login: (data: LoginRequest) => Promise<void>;
   intranetAccess: (data: IntranetAccessRequest) => Promise<void>;
   logout: () => void;
@@ -82,6 +83,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [user]
   );
 
+  const isAdministrator = Boolean(user?.roles.some(
+    (role) => role.statusRole && ["administrador", "superadministrador", "superadmin"]
+      .includes(role.nameRole.trim().toLowerCase())
+  ));
+
   useEffect(() => {
     const loadCurrentUser = async () => {
       const storedToken = localStorage.getItem("accessToken");
@@ -116,6 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token,
       loadingAuth,
       isAuthenticated: Boolean(token && user),
+      isAdministrator,
       login,
       intranetAccess,
       logout,
@@ -129,6 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       intranetAccess,
       logout,
       hasPermission,
+      isAdministrator,
     ]
   );
 

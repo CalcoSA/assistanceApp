@@ -6,9 +6,12 @@ from app.domain.entities.Attendance import Attendance
 from app.domain.entities.EventTopic import EventTopic
 from sqlalchemy.orm import Session, joinedload
 from app.domain.entities.Event import Event
+from app.domain.dtos.TrainingParameterDto import normalizeTopics
+from app.infrastructure.repositories.TrainingParameterRepository import TrainingParameterRepository
 from typing import List, Optional
-from datetime import datetime
-from sqlalchemy import func
+from datetime import date, datetime
+from typing import Callable
+from sqlalchemy import func, or_
 import math
 
 class EventRepository(IEventRepository):
@@ -50,6 +53,13 @@ class EventRepository(IEventRepository):
     
     def getAttendancesByEvent(self, IdEvent: int) -> List[Attendance]:
         return (self.db.query(Attendance).options(joinedload(Attendance.attendancePerson)).filter(Attendance.IdEvent == IdEvent).order_by(Attendance.createdAt.desc()).all())
+
+    def getAttendanceByEvent(self, IdEvent: int, IdAttendance: int) -> Optional[Attendance]:
+        return (
+            self.db.query(Attendance).options(joinedload(Attendance.attendancePerson))
+            .filter(Attendance.IdEvent == IdEvent, Attendance.IdAttendance == IdAttendance)
+            .populate_existing().first()
+        )
     
     def getPaginated(self, page: int, pageSize: int, status: Optional[str], createdByUserLogin: Optional[str],):
         page = max(page, 1)
@@ -88,8 +98,28 @@ class EventRepository(IEventRepository):
             "totalPages": math.ceil(total / pageSize) if total > 0 else 0,
         }
 
-    def create(self, eventData: Event, topics: List[str], competencies: List[int]) -> Event:
+    def create(self, eventData: Event, topics: Optional[List[str]], competencies: List[int]) -> Event:
         try:
+            if eventData.IdTrainingParameter is not None:
+                parameter = TrainingParameterRepository(self.db).getById(
+                    eventData.IdTrainingParameter, forUpdate=True,
+                )
+                if not parameter:
+                    raise ValueError("El parámetro de capacitación no existe.")
+                if not parameter.isActive:
+                    raise ValueError("El parámetro de capacitación no está activo.")
+                parameter.validateReady()
+                topics = normalizeTopics(
+                    [topic.nameParameterTopic for topic in parameter.topics]
+                    if topics is None else topics
+                )
+                if not topics:
+                    raise ValueError("El evento parametrizado debe tener al menos un tema.")
+                for field in ("Path", "OriginalName", "MimeType", "Size"):
+                    setattr(
+                        eventData, f"pensum{field}Event",
+                        getattr(parameter, f"pensum{field}TrainingParameter"),
+                    )
             self.db.add(eventData)
             self.db.flush()
             self._replaceTopics(eventData.IdEvent, topics)
@@ -106,12 +136,23 @@ class EventRepository(IEventRepository):
             self.db.rollback()
             raise Exception(f"Error al crear el evento: {str(e)}")
 
+        except Exception:
+            self.db.rollback()
+            raise
+
     def update(self, IdEvent: int, updateData: dict, topics, competencies) -> Optional[Event]:
         try:
             eventFound = self.getById(IdEvent)
 
             if not eventFound:
                 return None
+
+            if "IdTrainingParameter" in updateData:
+                raise ValueError("IdTrainingParameter no se puede cambiar ni retirar.")
+            if eventFound.IdTrainingParameter is not None and any(
+                key.startswith("pensum") for key in updateData
+            ):
+                raise ValueError("No se permite reemplazar el PÉNSUM de un evento parametrizado.")
 
             for key, value in updateData.items():
                 setattr(eventFound, key, value)
@@ -134,6 +175,10 @@ class EventRepository(IEventRepository):
         except SQLAlchemyError as e:
             self.db.rollback()
             raise Exception(f"Error al actualizar el evento: {str(e)}")
+
+        except Exception:
+            self.db.rollback()
+            raise
         
     def updatePensum(self, IdEvent: int, pensumOriginalNameEvent: str, pensumPathEvent: str, pensumMimeTypeEvent: str, pensumSizeEvent: int, updatedByUserLogin: str) -> Optional[Event]:
         try:
@@ -141,6 +186,9 @@ class EventRepository(IEventRepository):
 
             if not eventFound:
                 return None
+
+            if eventFound.IdTrainingParameter is not None:
+                raise ValueError("No se permite reemplazar el PÉNSUM de un evento parametrizado.")
 
             eventFound.pensumOriginalNameEvent = pensumOriginalNameEvent
             eventFound.pensumPathEvent = pensumPathEvent
@@ -158,7 +206,11 @@ class EventRepository(IEventRepository):
             self.db.rollback()
             raise Exception(f"Error al actualizar el pensum del evento: {str(e)}")
 
-    def cancel(self, IdEvent: int) -> Optional[Event]:
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def cancel(self, IdEvent: int, observationsEvent: str) -> Optional[Event]:
         try:
             eventFound = self.getById(IdEvent)
 
@@ -166,6 +218,7 @@ class EventRepository(IEventRepository):
                 return None
 
             eventFound.IdEventStatus = 3
+            eventFound.observationsEvent = observationsEvent
 
             self.db.commit()
             self.db.refresh(eventFound)
@@ -175,6 +228,29 @@ class EventRepository(IEventRepository):
         except SQLAlchemyError as e:
             self.db.rollback()
             raise Exception(f"Error al cancelar el evento: {str(e)}")
+
+    def getQrCleanupCandidates(self, throughDate: date, afterId: int, limit: int = 100) -> list[int]:
+        # Coarse date filter only: the application rechecks the exact attendance
+        # deadline under the row lock, including the existing grace period.
+        return [row.IdEvent for row in (
+            self.db.query(Event.IdEvent)
+            .filter(Event.IdEvent > afterId, Event.qrPathEvent.isnot(None), Event.qrPathEvent != "")
+            .filter(or_(Event.IdEventStatus == 3, Event.dateEvent <= throughDate))
+            .order_by(Event.IdEvent).limit(limit).all()
+        )]
+
+    def cleanupQr(self, IdEvent: int, removeIfExpired: Callable[[Event], bool]) -> None:
+        try:
+            event = (
+                self.db.query(Event).filter(Event.IdEvent == IdEvent)
+                .populate_existing().with_for_update().first()
+            )
+            if event and event.qrPathEvent and removeIfExpired(event):
+                event.qrPathEvent = None
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
     def delete(self, IdEvent: int) -> bool:
         try:

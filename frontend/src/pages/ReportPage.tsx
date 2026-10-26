@@ -20,7 +20,6 @@ import type {
   SstTrainingReportResponse,
   TrainingHoursReportResponse,
   NewStaffInductionReportResponse,
-  AdministrativeInductionReportResponse,
   TransversalTrainingReportResponse,
   CollaboratorTrainingReportResponse,
   GeneralReportResponse,
@@ -268,7 +267,6 @@ const formatTrainingDuration = (decimalHours?: number | null) => {
 };
 
 export function ReportPage() {
-  const [administrativeInductionReport, setAdministrativeInductionReport] = useState<AdministrativeInductionReportResponse | null>(null);
   const [transversalTrainingReport, setTransversalTrainingReport] = useState<TransversalTrainingReportResponse | null>(null);
   const [averageTrainingTimeReport, setAverageTrainingTimeReport] = useState<AverageTrainingTimeReportResponse | null>(null);
   const [newStaffInductionReport, setNewStaffInductionReport] = useState<NewStaffInductionReportResponse | null>(null);
@@ -317,7 +315,7 @@ export function ReportPage() {
 
       setLoading(true);
 
-      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, transversalTrainingResponse, generalResponse, thematicTrainingResponse] = await Promise.all([
+      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, transversalTrainingResponse, generalResponse, thematicTrainingResponse] = await Promise.all([
         reportService.getTrainingReport({
           dateFrom,
           dateTo,
@@ -331,10 +329,6 @@ export function ReportPage() {
           dateTo,
         }),
         reportService.getNewStaffInductionReport({
-          dateFrom,
-          dateTo,
-        }),
-        reportService.getAdministrativeInductionReport({
           dateFrom,
           dateTo,
         }),
@@ -372,11 +366,6 @@ export function ReportPage() {
         return;
       }
 
-      if (!administrativeInductionResponse.isSuccess || !administrativeInductionResponse.result) {
-        showResponseModal("error", "Error", administrativeInductionResponse.Message || "No se pudo cargar el reporte de inducción a personal administrativo.");
-        return;
-      }
-
       if (!transversalTrainingResponse.isSuccess || !transversalTrainingResponse.result) {
         showResponseModal("error", "Error", transversalTrainingResponse.Message || "No se pudo cargar el reporte de capacitaciones transversales.");
         return;
@@ -396,7 +385,6 @@ export function ReportPage() {
       setSstReport(sstTrainingResponse.result);
       setTrainingHoursReport(trainingHoursResponse.result);
       setNewStaffInductionReport(newStaffInductionResponse.result);
-      setAdministrativeInductionReport(administrativeInductionResponse.result);
       setTransversalTrainingReport(transversalTrainingResponse.result);
       setGeneralReport(generalResponse.result);
       setThematicTrainingReport(thematicTrainingResponse.result);
@@ -416,7 +404,7 @@ export function ReportPage() {
     try {
       setLoading(true);
 
-      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, administrativeInductionResponse, transversalTrainingResponse, generalResponse, thematicTrainingResponse] = await Promise.all([
+      const [trainingResponse, sstTrainingResponse, trainingHoursResponse, newStaffInductionResponse, transversalTrainingResponse, generalResponse, thematicTrainingResponse] = await Promise.all([
         reportService.getTrainingReport({
           dateFrom: currentMonthRange.dateFrom,
           dateTo: currentMonthRange.dateTo,
@@ -430,10 +418,6 @@ export function ReportPage() {
           dateTo: currentMonthRange.dateTo,
         }),
         reportService.getNewStaffInductionReport({
-          dateFrom: currentMonthRange.dateFrom,
-          dateTo: currentMonthRange.dateTo,
-        }),
-        reportService.getAdministrativeInductionReport({
           dateFrom: currentMonthRange.dateFrom,
           dateTo: currentMonthRange.dateTo,
         }),
@@ -455,7 +439,6 @@ export function ReportPage() {
       setSstReport(sstTrainingResponse.isSuccess ? sstTrainingResponse.result ?? null : null);
       setTrainingHoursReport(trainingHoursResponse.isSuccess ? trainingHoursResponse.result ?? null : null);
       setNewStaffInductionReport(newStaffInductionResponse.isSuccess ? newStaffInductionResponse.result ?? null : null);
-      setAdministrativeInductionReport(administrativeInductionResponse.isSuccess ? administrativeInductionResponse.result ?? null : null);
       setTransversalTrainingReport(transversalTrainingResponse.isSuccess ? transversalTrainingResponse.result ?? null : null);
       setGeneralReport(generalResponse.isSuccess ? generalResponse.result ?? null : null);
       setThematicTrainingReport(thematicTrainingResponse.isSuccess ? thematicTrainingResponse.result ?? null : null);
@@ -556,7 +539,6 @@ export function ReportPage() {
       sstReport ||
       trainingHoursReport ||
       newStaffInductionReport ||
-      administrativeInductionReport ||
       transversalTrainingReport ||
       generalReport ||
       thematicTrainingReport ||
@@ -842,17 +824,6 @@ export function ReportPage() {
     addRow([
       "Total de personal capacitado en inducción a personal nuevo",
       formatNumber(newStaffInductionReport?.totalNewStaffInductionPeople),
-    ]);
-
-    addSection("INDUCCIÓN A PERSONAL ADMINISTRATIVO");
-    addHeader(["Indicador", "Valor"]);
-    addDurationRow([
-      "Tiempo total de inducción a personal administrativo",
-      formatNumber(administrativeInductionReport?.totalAdministrativeInductionHours),
-    ], 1);
-    addRow([
-      "Total de personal capacitado en inducción a personal administrativo",
-      formatNumber(administrativeInductionReport?.totalAdministrativeInductionPeople),
     ]);
 
     addSection("CAPACITACIONES TRANSVERSALES");
@@ -1911,49 +1882,6 @@ export function ReportPage() {
                     </Typography>
                     <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
                       {newStaffInductionReport?.totalNewStaffInductionPeople ?? 0}
-                    </Typography>
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-          </Box>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 2 }}>
-            <Typography sx={{ color: "#4B2E1F", fontSize: 22, fontWeight: 800 }}>
-              Inducción a personal administrativo
-            </Typography>
-          </Box>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr", }, gap: 2, }}>
-            <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8", }}>
-              <CardContent>
-                <Box sx={{ display: "flex", flexDirection: "row", gap: 2, alignItems: "center", }}>
-                  <Box sx={{ width: 50, height: 50, borderRadius: "50%", bgcolor: "#F7E8D8", color: "#4B2E1F", display: "flex", alignItems: "center", justifyContent: "center", }}>
-                    <AccessTimeOutlinedIcon />
-                  </Box>
-                  <Box>
-                    <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                      Tiempo total de inducción a personal administrativo
-                    </Typography>
-                    <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                      {formatTrainingDuration(
-                        administrativeInductionReport?.totalAdministrativeInductionHours
-                      )}
-                    </Typography>
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-            <Card elevation={0} sx={{ border: "1px solid #E0CDBB", borderRadius: 3, bgcolor: "#FFFDF8", }}>
-              <CardContent>
-                <Box sx={{ display: "flex", flexDirection: "row", gap: 2, alignItems: "center", }}>
-                  <Box sx={{ width: 50, height: 50, borderRadius: "50%", bgcolor: "#E8F5E9", color: "#2E7D32", display: "flex", alignItems: "center", justifyContent: "center", }}>
-                    <GroupsOutlinedIcon />
-                  </Box>
-                  <Box>
-                    <Typography sx={{ color: "#7A6252", fontSize: 14 }}>
-                      Personal capacitado en inducción a personal administrativo
-                    </Typography>
-                    <Typography sx={{ color: "#4B2E1F", fontSize: 30, fontWeight: 800 }}>
-                      {administrativeInductionReport?.totalAdministrativeInductionPeople ?? 0}
                     </Typography>
                   </Box>
                 </Box>

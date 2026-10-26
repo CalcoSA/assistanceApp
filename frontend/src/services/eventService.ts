@@ -1,4 +1,4 @@
-import type { Event, EventCreateRequest, EventQr, EventAttendance, EventFilterRequest, EventPaginatedResult } from "../models/Event";
+import type { Event, EventCreateRequest, EventUpdateRequest, EventQr, EventAttendance, EventFilterRequest, EventPaginatedResult } from "../models/Event";
 import type { ApiResponse } from "../models/ApiResponse";
 import type { OnlyOfficePreview } from "../models/OnlyOffice";
 import { apiClient } from "./apiClient";
@@ -24,13 +24,13 @@ export const eventService = {
     return response.data;
   },
 
-  update: async (IdEvent: number, data: Partial<EventCreateRequest>): Promise<ApiResponse<Event>> => {
+  update: async (IdEvent: number, data: EventUpdateRequest): Promise<ApiResponse<Event>> => {
     const response = await apiClient.put<ApiResponse<Event>>(`/events/${IdEvent}`, data);
     return response.data;
   },
 
-  cancel: async (IdEvent: number): Promise<ApiResponse<Event>> => {
-    const response = await apiClient.patch<ApiResponse<Event>>(`/events/${IdEvent}/cancel`);
+  cancel: async (IdEvent: number, cancellationReason: string): Promise<ApiResponse<Event>> => {
+    const response = await apiClient.patch<ApiResponse<Event>>(`/events/${IdEvent}/cancel`, { cancellationReason });
     return response.data;
   },
 
@@ -63,6 +63,13 @@ export const eventService = {
       "/onlyoffice/pensum/preview",
       formData,
       { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return response.data;
+  },
+
+  getPensumAccess: async (IdEvent: number, download = false): Promise<ApiResponse<string>> => {
+    const response = await apiClient.get<ApiResponse<string>>(
+      `/events/${IdEvent}/pensum/access`, { params: { download } }
     );
     return response.data;
   },

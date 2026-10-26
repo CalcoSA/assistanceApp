@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 class Settings(BaseSettings):
@@ -35,6 +36,19 @@ class Settings(BaseSettings):
     ONLYOFFICE_JWT_SECRET: str | None = None
     ONLYOFFICE_TOKEN_EXPIRE_MINUTES: int = 30
     ONLYOFFICE_TEMP_FILE_EXPIRE_MINUTES: int = 60
+    ONLYOFFICE_TEMP_DIR: str | None = None
+
+    # GCS is opt-in: validate these only when constructing its storage service.
+    GCS_ENVIRONMENT: str | None = None
+    GCS_PROJECT_ID: str | None = None
+    GCS_BUCKET: str | None = None
+    GCS_PREFIX: str | None = None
+    GCS_AUTH_MODE: str | None = None
+    GCS_ENDPOINT: str = "https://storage.googleapis.com"
+    GCS_HMAC_ACCESS_KEY: SecretStr | None = Field(default=None, repr=False)
+    GCS_HMAC_SECRET_KEY: SecretStr | None = Field(default=None, repr=False)
+    GCS_SIGNING_SERVICE_ACCOUNT_EMAIL: str | None = None
+    GCS_TIMEOUT_SECONDS: float = 30
 
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587
@@ -51,6 +65,7 @@ class Settings(BaseSettings):
         env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
+        hide_input_in_errors=True,
         extra="ignore"
     )
 

@@ -179,7 +179,7 @@ def test_grace_period_handles_event_end_near_midnight():
     ) == datetime(2026, 9, 1, 0, 20)
 
 
-def test_registration_is_allowed_above_scheduled_people():
+def test_registration_is_allowed_above_scheduled_people(monkeypatch):
     event = buildEvent()
     event.scheduledPeopleNumber = 1
     person = SimpleNamespace(
@@ -198,12 +198,13 @@ def test_registration_is_allowed_above_scheduled_people():
         def getByEventAndPerson(self, IdEvent: int, IdAttendancePerson: int):
             return None
 
-        def createAndCount(self, *args):
-            return SimpleNamespace(IdAttendance=22), 2
+        def registerWithSignature(self, eventId, data, ipAddress, userAgent, saveSignature):
+            saveSignature(7)
+            return 22, 7, 2, person.signaturePathAttendancePerson
 
     class FakePersonnelTypeRepository:
         def getById(self, IdPersonnelType: int):
-            return SimpleNamespace(IdPersonnelType=IdPersonnelType)
+            return SimpleNamespace(IdPersonnelType=IdPersonnelType, namePersonnelType="Administrativo")
 
     service = buildAttendanceApplication(
         event,
@@ -212,6 +213,11 @@ def test_registration_is_allowed_above_scheduled_people():
     service.attendancePersonRepository = FakeAttendancePersonRepository()
     service.attendanceRepository = FakeAttendanceRepository()
     service.personnelTypeRepository = FakePersonnelTypeRepository()
+    service._decodeSignature = lambda *args: b"synthetic signature"
+    monkeypatch.setattr("app.application.services.AttendanceApplication.GcsStorage", lambda: SimpleNamespace(
+        objectReference=lambda path: f"gs://test-bucket/assistanceApp_dev/{path}",
+        upload=lambda *args: 1, close=lambda: None,
+    ))
 
     result = service.registerAttendance(
         "valid-token",
@@ -219,6 +225,7 @@ def test_registration_is_allowed_above_scheduled_people():
             documentNumberAttendancePerson="123",
             fullNameAttendancePerson="Persona dos",
             IdPersonnelType=1,
+            signatureBase64="data:image/png;base64,bmV3",
         ),
         "127.0.0.1",
         "pytest",
