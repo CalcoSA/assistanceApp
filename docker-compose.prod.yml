@@ -1,23 +1,108 @@
+
 name: assistance-app-prod
 
 services:
+
+  # ==========================================
+  # CLOUD SQL AUTH PROXY
+  # ==========================================
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.26.3
+    container_name: assistance-app-prod-cloudsql
+    command:
+      - "--address=0.0.0.0"
+      - "--port=3306"
+      - "calco-sa-508817:us-central1:bdcalco"
+    restart: unless-stopped
+
+  # ==========================================
+  # BACKEND FASTAPI
+  # ==========================================
   backend:
     container_name: assistance-app-prod-backend
     build:
       context: ./backend
       dockerfile: Dockerfile
-    env_file:
-      - ./backend/.env
+
     environment:
+      # Aplicación
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8000"
+      APP_DEBUG: "false"
+      APP_TIMEZONE: America/Bogota
+
+      # Base de datos Cloud SQL
+      DB_HOST: cloud-sql-proxy
+      DB_PORT: "3306"
+      DB_NAME: bdcalco_assistanceApp
+
+      # Intranet WordPress
+      WP_DB_HOST: ${WP_DB_HOST:?Falta WP_DB_HOST}
+      WP_DB_PORT: ${WP_DB_PORT:-3306}
+      WP_DB_NAME: ${WP_DB_NAME:?Falta WP_DB_NAME}
+
+      # Autenticación
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: "480"
+      INTRANET_SSO_EXPIRE_SECONDS: "120"
+
+      # Correo SMTP
+      SMTP_HOST: ${SMTP_HOST:?Falta SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:?Falta SMTP_FROM_EMAIL}
+      SMTP_FROM_NAME: "Sistema de Registro de Asistencia"
+      SMTP_REPLY_TO: ${SMTP_REPLY_TO:-}
+      SMTP_USE_TLS: "true"
+      SMTP_USE_SSL: "false"
+      SMTP_TIMEOUT_SECONDS: "15"
+
+      # Aplicación pública
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Falta PUBLIC_BASE_URL}
+      UPLOAD_DIR: uploads
+
+      # OnlyOffice
       ONLYOFFICE_PUBLIC_URL: /documentserver
       ONLYOFFICE_STORAGE_BASE_URL: http://backend:8000
-      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?ONLYOFFICE_JWT_SECRET no configurado}
+
+      # Google Cloud Storage
+      GCS_ENVIRONMENT: production
+      GCS_PROJECT_ID: calco-sa-508817
+      GCS_BUCKET: calco-storage
+      GCS_PREFIX: assistanceApp_prod/
+      GCS_AUTH_MODE: adc
+      GCS_ENDPOINT: https://storage.googleapis.com
+      GCS_TIMEOUT_SECONDS: "30"
+      GCS_SIGNING_SERVICE_ACCOUNT_EMAIL: sa-assistanceapp-prod@calco-sa-508817.iam.gserviceaccount.com
+
+      # Referencias a GCP Secret Manager
+      DB_USER_SECRET_NAME: assistanceapp-prod-db-user
+      DB_PASSWORD_SECRET_NAME: assistanceapp-prod-db-password
+
+      WP_DB_USER_SECRET_NAME: assistanceapp-prod-wp-user
+      WP_DB_PASSWORD_SECRET_NAME: assistanceapp-prod-wp-password
+
+      JWT_SECRET_KEY_SECRET_NAME: assistanceapp-prod-jwt-key
+      INTRANET_SSO_SECRET_NAME: assistanceapp-prod-sso-secret
+
+      SMTP_USERNAME_SECRET_NAME: assistanceapp-prod-smtp-username
+      SMTP_PASSWORD_SECRET_NAME: assistanceapp-prod-smtp-password
+
+      ONLYOFFICE_JWT_SECRET_NAME: assistanceapp-prod-onlyoffice-jwt
+
     expose:
       - "8000"
+
     volumes:
       - ./backend/uploads:/app/uploads
+
+    depends_on:
+      - cloud-sql-proxy
+
     restart: unless-stopped
 
+  # ==========================================
+  # FRONTEND REACT
+  # ==========================================
   frontend:
     container_name: assistance-app-prod-frontend
     build:
@@ -25,8 +110,11 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: /api
+
     ports:
       - "8082:80"
+
     depends_on:
       - backend
+
     restart: unless-stopped

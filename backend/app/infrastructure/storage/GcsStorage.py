@@ -41,10 +41,13 @@ class GcsStorage(IObjectStorage):
     Signed URLs are bearer credentials: never log them or attach them to errors.
     """
 
+
     _ENVIRONMENTS = {
         "development": ("assistanceApp_dev/", "hmac"),
         "qa": ("assistanceApp_qa/", "hmac"),
+        "production": ("assistanceApp_prod/", "adc"),
     }
+
     _ALGORITHM = "GOOG4-HMAC-SHA256"
 
     def __init__(self, configuration=settings, *, httpClient: httpx.Client | None = None):
@@ -74,12 +77,22 @@ class GcsStorage(IObjectStorage):
     @staticmethod
     def _validateConfiguration(configuration) -> None:
         expected = GcsStorage._ENVIRONMENTS.get(configuration.GCS_ENVIRONMENT)
+
         if expected is None:
-            raise GcsConfigurationError("Configure GCS_ENVIRONMENT como development o qa.")
+            raise GcsConfigurationError(
+                "Configure GCS_ENVIRONMENT como development, qa o production."
+            )
+
         if configuration.GCS_PREFIX != expected[0]:
-            raise GcsConfigurationError("GCS_PREFIX no corresponde al entorno GCS_ENVIRONMENT.")
+            raise GcsConfigurationError(
+                "GCS_PREFIX no corresponde al entorno GCS_ENVIRONMENT."
+            )
+
         if configuration.GCS_AUTH_MODE != expected[1]:
-            raise GcsConfigurationError("Development y QA requieren GCS_AUTH_MODE=hmac.")
+            raise GcsConfigurationError(
+                "Development y QA requieren hmac; production requiere adc."
+            )
+
         if not configuration.GCS_BUCKET or not re.fullmatch(
             r"[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]", configuration.GCS_BUCKET,
         ):
