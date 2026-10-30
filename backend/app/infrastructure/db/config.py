@@ -1,6 +1,66 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, SecretStr
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import os
+
+
+def loadProductionSecrets() -> dict[str, str]:
+    if os.getenv("GCS_ENVIRONMENT") != "production":
+        return {}
+
+    from google.cloud import secretmanager
+
+    projectId = os.getenv("GCS_PROJECT_ID")
+    if not projectId:
+        raise RuntimeError("Falta GCS_PROJECT_ID en producción.")
+
+    # Relación entre variables de FastAPI y referencias de Secret Manager
+    references = {
+        "DB_USER": "DB_USER_SECRET_NAME",
+        "DB_PASSWORD": "DB_PASSWORD_SECRET_NAME",
+        "WP_DB_USER": "WP_DB_USER_SECRET_NAME",
+        "WP_DB_PASSWORD": "WP_DB_PASSWORD_SECRET_NAME",
+        "JWT_SECRET_KEY": "JWT_SECRET_KEY_SECRET_NAME",
+        "INTRANET_SSO_SECRET": "INTRANET_SSO_SECRET_NAME",
+        "SMTP_USERNAME": "SMTP_USERNAME_SECRET_NAME",
+        "SMTP_PASSWORD": "SMTP_PASSWORD_SECRET_NAME",
+        "ONLYOFFICE_JWT_SECRET": "ONLYOFFICE_JWT_SECRET_NAME",
+    }
+
+    client = secretmanager.SecretManagerServiceClient()
+    values = {}
+
+    for variable, reference in references.items():
+        secretId = os.getenv(reference)
+
+        if not secretId:
+            raise RuntimeError(f"Falta la referencia {reference}.")
+
+        name = (
+            f"projects/{projectId}/secrets/"
+            f"{secretId}/versions/latest"
+        )
+
+        try:
+            response = client.access_secret_version(
+                request={"name": name}
+            )
+
+            value = response.payload.data.decode("utf-8")
+
+            if not value:
+                raise ValueError("Secreto vacío.")
+
+        except Exception:
+            raise RuntimeError(
+                f"No fue posible cargar el secreto de {variable}."
+            ) from None
+
+        values[variable] = value
+
+    return values
+
+
 
 class Settings(BaseSettings):
 
@@ -69,7 +129,7 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-settings = Settings()
+settings = Settings(**loadProductionSecrets())
 
 try:
     APP_TIMEZONE_INFO = ZoneInfo(settings.APP_TIMEZONE)
